@@ -70,7 +70,8 @@ def process(p: Path) -> dict:
             rec["status"] = "built" if v["brep_valid"] else "built_invalid"
         else:
             kind, msg = build["error"]
-            rec["status"] = "interpreted_only" if kind == "spec" else "build_failed"
+            rec["status"] = ("not_a_part" if spec.shape_class == "not_a_part"
+                             else "interpreted_only" if kind == "spec" else "build_failed")
             rec["build_error"] = msg
     except Exception as e:
         rec["status"] = "error"
@@ -97,12 +98,16 @@ def make_report():
         f"| ✅ 自動3D化成功 (BRepCheck valid) | {built} | {built/total*100:.0f}% |" if total else "",
         f"| 📋 解釈のみ (未対応形状クラス) | {interp} | {interp/total*100:.0f}% |" if total else "",
     ]
-    for st in ("built_invalid", "build_failed", "error", "skipped_large"):
+    for st in ("built_invalid", "build_failed", "error", "not_a_part", "skipped_large"):
         n = len(by.get(st, []))
         if n:
             label = {"built_invalid": "⚠ 生成したが検証警告", "build_failed": "✗ ビルド失敗",
-                     "error": "✗ 解釈/解析エラー", "skipped_large": f"― スキップ (>{MAX_MB}MB)"}[st]
+                     "error": "✗ 解釈/解析エラー", "not_a_part": "― 対象外 (組立図・購入品・ステッカー等)",
+                     "skipped_large": f"― スキップ (>{MAX_MB}MB)"}[st]
             lines.append(f"| {label} | {n} | {n/total*100:.0f}% |")
+    eff = total - len(by.get("not_a_part", [])) - len(by.get("skipped_large", []))
+    if eff > 0:
+        lines.append(f"\n**実質成功率 (対象外・スキップを分母から除外): {built}/{eff} = {built/eff*100:.0f}%**")
     lines += ["", "## 明細", "",
               "| 図面 | 結果 | 形状クラス | 部品名 | 仮定 | 矛盾 | 備考 |", "|---|---|---|---|---|---|---|"]
     for r in recs:

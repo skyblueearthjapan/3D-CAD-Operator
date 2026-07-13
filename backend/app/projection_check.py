@@ -191,6 +191,10 @@ def check_projection(solid, spec, dxfdoc) -> dict:
       no_view          : 投影と一致する外形輪郭が図面にない → warning
       skipped_*        : 照合不可 (破断図・輪郭検出ゼロ) → warningなし
     """
+    if spec.shape_class == "rolled_plate":
+        # 円弧曲げのXY投影は環状セクタの包絡矩形で、図面ビューと一致する保証がない
+        return {"status": "skipped_rolled_plate", "warnings": [],
+                "note": "rolled_plateは投影照合非対応(verifyの理論体積照合が主チェック)"}
     if _is_broken_view(dxfdoc):
         return {"status": "skipped_broken_view", "warnings": [],
                 "note": "破断図(寸法上書き)のため投影照合をスキップ"}
@@ -201,7 +205,9 @@ def check_projection(solid, spec, dxfdoc) -> dict:
     bb = solid.bounding_box()
     W, H, D = bb.size.X, bb.size.Y, bb.size.Z
     bb_min = (bb.min.X, bb.min.Y)
-    zholes = [(i, h) for i, h in enumerate(spec.holes) if h.axis == "z"]
+    # bent_plate の穴は segment/u/v ローカル座標で x/y は無意味 → 穴照合の対象外
+    zholes = ([] if spec.shape_class == "bent_plate"
+              else [(i, h) for i, h in enumerate(spec.holes) if h.axis == "z"])
     circles = _circle_loops(loops)
 
     # --- 正面ビュー候補 (XY投影と同サイズ)。閉ループ優先、なければ連結成分bbox。
@@ -256,6 +262,8 @@ def snap_fix(spec, dxfdoc, projection) -> tuple[list, list[str]] | None:
     """
     if not projection or projection.get("status") != "holes_missing":
         return None
+    if spec.shape_class == "bent_plate":
+        return None  # bent_plateの穴はローカル座標のため吸着補正の対象外
     view = projection["view_bbox"]
     mapping = tuple(projection["_mapping"])
     bb_min = tuple(projection["_bb_min"])

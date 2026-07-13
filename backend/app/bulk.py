@@ -99,7 +99,10 @@ def _worker(job: dict, files: list[Path], out_dir: Path):
                 rec["status"] = "built" if v["brep_valid"] else "built_invalid"
             else:
                 kind, msg = build["error"]
-                if kind == "spec":
+                if spec.shape_class == "not_a_part":
+                    rec["status"] = "not_a_part"
+                    rec["error"] = (spec.unsupported_reason or msg)[:300]
+                elif kind == "spec":
                     rec["status"] = "interpreted_only"
                     rec["error"] = (spec.unsupported_reason or msg)[:300]
                 else:
