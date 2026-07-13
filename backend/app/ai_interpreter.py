@@ -500,7 +500,9 @@ def verify(solid, spec: ShapeSpec, dxfdoc=None) -> dict:
         r = (h.diameter or 0) / 2
         outside = False
         if spec.shape_class in ("circular_plate", "revolved"):
-            lim = (spec.outer_diameter or (spec.outer_stack[0].diameter if spec.outer_stack else 0)) / 2
+            # revolved はフランジ等の最大段径が外形限界
+            lim = (spec.outer_diameter or (max(s.diameter for s in spec.outer_stack)
+                                           if spec.outer_stack else 0)) / 2
             outside = lim > 0 and (h.x**2 + h.y**2) ** 0.5 + r > lim + 0.5
         elif spec.shape_class == "rect_plate" and spec.length and spec.width:
             outside = not (-0.5 <= h.x <= spec.length + 0.5 and -0.5 <= h.y <= spec.width + 0.5)
@@ -558,6 +560,39 @@ def _build_pass(spec: ShapeSpec, dxfdoc=None) -> dict:
     return out
 
 
+def build_pass_with_fix(spec: ShapeSpec, dxfdoc=None) -> tuple[ShapeSpec, dict]:
+    """ビルド+検証し、投影照合が穴の不一致を出したら図面吸着の自動補正を1回試す。
+
+    補正は位置のみ (projection_check.snap_fix)。補正後に再ビルド+再照合し、
+    警告が消える/減る場合のみ採用。採用時は spec.assumptions に補正内容を記録し
+    (UIの⚠仮定にそのまま表示される)、build["auto_fix"] にも同じメモを入れる。
+    """
+    build = _build_pass(spec, dxfdoc)
+    proj = (build["verification"] or {}).get("projection") if build["verification"] else None
+    if (build["solid"] is None or build["ok"] or dxfdoc is None
+            or not proj or proj.get("status") != "holes_missing"):
+        return spec, build
+    try:
+        from .projection_check import snap_fix
+        fixed = snap_fix(spec, dxfdoc, proj)
+    except Exception:
+        fixed = None
+    if not fixed:
+        return spec, build
+    new_holes, notes = fixed
+    note = "投影照合による自動補正(穴位置を図面の円に吸着): " + "; ".join(notes)
+    spec2 = spec.model_copy(update={
+        "holes": new_holes, "assumptions": spec.assumptions + [note]})
+    build2 = _build_pass(spec2, dxfdoc)
+    w1 = len((build["verification"] or {}).get("dimension_warnings", []))
+    w2 = (len((build2["verification"] or {}).get("dimension_warnings", []))
+          if build2["verification"] else w1 + 1)
+    if build2["ok"] or w2 < w1:
+        build2["auto_fix"] = note
+        return spec2, build2
+    return spec, build
+
+
 def run_interpret(dxfdoc, out_dir, base_name: str, sid: str,
                   cross_check: bool = False) -> dict:
     """ダンプ→解釈→ビルド→検証→エクスポート。
@@ -569,7 +604,7 @@ def run_interpret(dxfdoc, out_dir, base_name: str, sid: str,
     from pathlib import Path
     dump = generate_dump(dxfdoc)
     spec, usage = interpret(dump)
-    build = _build_pass(spec, dxfdoc)
+    spec, build = build_pass_with_fix(spec, dxfdoc)
 
     # ---- 品質フォールバック: 検証警告ありなら別エンジンで再解釈して比較
     used = usage.get("model", "")
@@ -578,7 +613,7 @@ def run_interpret(dxfdoc, out_dir, base_name: str, sid: str,
     if (not build["ok"]) and build["error"] is None and os.environ.get(other_key):
         try:
             spec2, usage2 = interpret(dump, force=other)
-            build2 = _build_pass(spec2, dxfdoc)
+            spec2, build2 = build_pass_with_fix(spec2, dxfdoc)
             if build2["ok"] or (build2["verification"] and not build["verification"]):
                 warn = (build["verification"] or {}).get("dimension_warnings", [])
                 usage2["fallback_reason"] = (
@@ -605,6 +640,7 @@ def run_interpret(dxfdoc, out_dir, base_name: str, sid: str,
         "step": None, "glb": None,
         "verification": build["verification"],
         "build_error": None,
+        "auto_fix": build.get("auto_fix"),
         "cross_check_auto": bool(uncertain and not cross_check and gemini is not None),
     }
     out_dir = Path(out_dir)
@@ -626,7 +662,7 @@ def run_interpret(dxfdoc, out_dir, base_name: str, sid: str,
     # ---- 裏ログ: 解釈JSONを出力先に保存 (トラブル調査用)
     try:
         log = {k: result[k] for k in ("spec", "usage", "verification", "build_error",
-                                      "buildable", "cross_check_diffs")}
+                                      "buildable", "auto_fix", "cross_check_diffs")}
         (out_dir / f"{base_name}_AI解釈ログ.json").write_text(
             _json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
     except Exception:

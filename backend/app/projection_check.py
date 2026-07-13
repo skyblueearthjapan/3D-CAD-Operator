@@ -134,21 +134,39 @@ def _bbox_size_match(bbox, w: float, h: float) -> bool:
             (abs(lw - h) <= th and abs(lh - w) <= tw))
 
 
-def _score_holes(view_bbox, holes: list, circles, bb_min, size) -> tuple[int, list]:
-    """正面ビュー候補 (bbox) に対する穴の一致数 (鏡像4通りの最良)。戻り値 (一致数, 不一致穴)。"""
-    W, H = size
-    lx, ly = view_bbox[0], view_bbox[1]
-    best = (-1, holes)
+def _map_pos(x, y, bb_min, size, mapping, view_origin):
+    """spec座標の点を、鏡像mapping適用でビュー(図面)座標へ。"""
+    ux, uy = x - bb_min[0], y - bb_min[1]
+    if mapping[0]:
+        ux = size[0] - ux
+    if mapping[1]:
+        uy = size[1] - uy
+    return view_origin[0] + ux, view_origin[1] + uy
+
+
+def _unmap_pos(ex, ey, bb_min, size, mapping, view_origin):
+    """_map_pos の逆変換 (図面座標→spec座標)。鏡像は自己逆なので同じ式。"""
+    ux, uy = ex - view_origin[0], ey - view_origin[1]
+    if mapping[0]:
+        ux = size[0] - ux
+    if mapping[1]:
+        uy = size[1] - uy
+    return bb_min[0] + ux, bb_min[1] + uy
+
+
+def _score_holes(view_bbox, iholes, circles, bb_min, size) -> tuple[int, list, tuple]:
+    """正面ビュー候補 (bbox) に対する穴の一致数 (鏡像4通りの最良)。
+
+    iholes は (spec.holes内のindex, HoleSpec) のリスト。
+    戻り値 (一致数, 不一致穴のindexリスト, 採用した鏡像mapping)。
+    """
+    origin = (view_bbox[0], view_bbox[1])
+    best = (-1, [i for i, _ in iholes], (False, False))
     for mx in (False, True):
         for my in (False, True):
             matched, missed = 0, []
-            for h in holes:
-                ux, uy = h.x - bb_min[0], h.y - bb_min[1]
-                if mx:
-                    ux = W - ux
-                if my:
-                    uy = H - uy
-                ex, ey = lx + ux, ly + uy
+            for i, h in iholes:
+                ex, ey = _map_pos(h.x, h.y, bb_min, size, (mx, my), origin)
                 radii = _accept_radii(h)
                 ok = any(
                     math.hypot(cx - ex, cy - ey) <= POS_TOL
@@ -157,9 +175,9 @@ def _score_holes(view_bbox, holes: list, circles, bb_min, size) -> tuple[int, li
                 if ok:
                     matched += 1
                 else:
-                    missed.append(h)
+                    missed.append(i)
             if matched > best[0]:
-                best = (matched, missed)
+                best = (matched, missed, (mx, my))
     return best
 
 
@@ -183,7 +201,7 @@ def check_projection(solid, spec, dxfdoc) -> dict:
     bb = solid.bounding_box()
     W, H, D = bb.size.X, bb.size.Y, bb.size.Z
     bb_min = (bb.min.X, bb.min.Y)
-    zholes = [h for h in spec.holes if h.axis == "z"]
+    zholes = [(i, h) for i, h in enumerate(spec.holes) if h.axis == "z"]
     circles = _circle_loops(loops)
 
     # --- 正面ビュー候補 (XY投影と同サイズ)。閉ループ優先、なければ連結成分bbox。
@@ -194,18 +212,22 @@ def check_projection(solid, spec, dxfdoc) -> dict:
         front = [b for b in components if _bbox_size_match(b, W, H)]
     if front:
         scored = [(_score_holes(b, zholes, circles, bb_min, (W, H)), b) for b in front]
-        (matched, missed), view = max(scored, key=lambda t: t[0][0])
+        (matched, missed_idx, mapping), view = max(scored, key=lambda t: t[0][0])
         result = {
             "status": "ok", "warnings": [],
-            "view_bbox": [round(v, 2) for v in view],
+            "view_bbox": [round(v, 4) for v in view],
             "holes_matched": matched, "holes_total": len(zholes),
+            # 以下は自動補正 (snap_fix) 用の内部情報
+            "_bb_min": [bb.min.X, bb.min.Y], "_size": [W, H],
+            "_mapping": list(mapping), "_missed_idx": missed_idx,
         }
-        if missed:
+        if missed_idx:
             det = "; ".join(
-                f"({h.x:.0f},{h.y:.0f})φ{h.diameter or h.thread}" for h in missed[:5])
+                f"({spec.holes[i].x:.0f},{spec.holes[i].y:.0f})"
+                f"φ{spec.holes[i].diameter or spec.holes[i].thread}" for i in missed_idx[:5])
             result["status"] = "holes_missing"
             result["warnings"] = [
-                f"投影照合: 穴{len(missed)}/{len(zholes)}件が図面の円と一致しません"
+                f"投影照合: 穴{len(missed_idx)}/{len(zholes)}件が図面の円と一致しません"
                 f" [{det}] — 座標・径の解釈ミスの可能性"]
         return result
 
@@ -219,3 +241,69 @@ def check_projection(solid, spec, dxfdoc) -> dict:
     return {"status": "no_view", "warnings": [
         f"投影照合: 生成形状の投影({W:.0f}×{H:.0f})と一致する外形輪郭が"
         f"図面に見つかりません — 外形寸法の解釈ミスの可能性"]}
+
+
+# ------------------------------------------------------------------ 自動補正
+
+def snap_fix(spec, dxfdoc, projection) -> tuple[list, list[str]] | None:
+    """holes_missing の照合結果から、不一致穴を図面の実際の円位置へ吸着補正する。
+
+    安全側の設計:
+      - 位置のみ補正する (径の変更・穴の削除はしない)
+      - 一致済みの穴が使っている円は候補から除外し、1つの円には1穴のみ割当
+      - 不一致穴の全件が径の合う空き円に解決できた場合のみ補正を返す (部分補正はしない)
+    戻り値: (補正後の holes リスト, 補正メモ) / 解決できなければ None
+    """
+    if not projection or projection.get("status") != "holes_missing":
+        return None
+    view = projection["view_bbox"]
+    mapping = tuple(projection["_mapping"])
+    bb_min = tuple(projection["_bb_min"])
+    size = tuple(projection["_size"])
+    missed = projection["_missed_idx"]
+    origin = (view[0], view[1])
+
+    circles = _circle_loops(detect_loops(dxfdoc.segments))
+    # 同心円 (皿/ザグリの二重円等) を1つの「図面上の穴」候補点にまとめる
+    centers: list[list] = []  # [cx, cy, {radii}]
+    for cx, cy, r in circles:
+        for c in centers:
+            if math.hypot(c[0] - cx, c[1] - cy) <= POS_TOL:
+                c[2].add(r)
+                break
+        else:
+            centers.append([cx, cy, {r}])
+    # ビューの内側にあるものだけ
+    centers = [c for c in centers
+               if view[0] - 2 <= c[0] <= view[2] + 2 and view[1] - 2 <= c[1] <= view[3] + 2]
+
+    # 一致済み穴が占有している円中心を除外
+    taken: set[int] = set()
+    for i, h in enumerate(spec.holes):
+        if h.axis != "z" or i in missed:
+            continue
+        ex, ey = _map_pos(h.x, h.y, bb_min, size, mapping, origin)
+        for k, c in enumerate(centers):
+            if k not in taken and math.hypot(c[0] - ex, c[1] - ey) <= POS_TOL:
+                taken.add(k)
+                break
+
+    new_holes = [h.model_copy() for h in spec.holes]
+    notes: list[str] = []
+    for i in missed:
+        h = spec.holes[i]
+        radii = _accept_radii(h)
+        ex, ey = _map_pos(h.x, h.y, bb_min, size, mapping, origin)
+        cands = [(k, c) for k, c in enumerate(centers)
+                 if k not in taken
+                 and any(abs(cr - r) <= RAD_TOL for cr in c[2] for r in radii)]
+        if not cands:
+            return None  # 径の合う空き円がない → 吸着では直せない (警告のまま人に届ける)
+        k, c = min(cands, key=lambda t: math.hypot(t[1][0] - ex, t[1][1] - ey))
+        taken.add(k)
+        sx, sy = _unmap_pos(c[0], c[1], bb_min, size, mapping, origin)
+        label = h.thread or (f"φ{h.diameter:g}" if h.diameter else "穴")
+        notes.append(f"{label} ({h.x:g},{h.y:g})→({sx:.2f},{sy:.2f})")
+        new_holes[i].x = round(sx, 3)
+        new_holes[i].y = round(sy, 3)
+    return new_holes, notes

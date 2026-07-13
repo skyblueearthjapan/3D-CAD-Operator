@@ -21,8 +21,8 @@ from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-from app.ai_interpreter import (ShapeSpec, SpecBuildError, build_from_spec,
-                                generate_dump, interpret, verify)
+from app.ai_interpreter import (ShapeSpec, build_pass_with_fix,
+                                generate_dump, interpret)
 from app.dxf_parser import DxfDocument
 
 DXF_ROOT = Path(os.environ.get(
@@ -55,23 +55,23 @@ def process(p: Path) -> dict:
         dump = generate_dump(doc)
         rec["dump_chars"] = len(dump)
         spec, usage = interpret(dump)
-        rec["spec"] = spec.model_dump()
         rec["usage"] = usage
-        try:
-            solid = build_from_spec(spec)
-            v = verify(solid, spec, doc)
+        spec, build = build_pass_with_fix(spec, doc)
+        rec["spec"] = spec.model_dump()
+        if build.get("auto_fix"):
+            rec["auto_fix"] = build["auto_fix"]
+        if build["solid"] is not None:
+            v = build["verification"]
             rec["verification"] = v
             from build123d import export_gltf, export_step
             base = MODELS / slug(p).replace(".dxf", "")
-            export_step(solid, str(base) + "_AI.step")
-            export_gltf(solid, str(base) + "_AI.glb", binary=True)
+            export_step(build["solid"], str(base) + "_AI.step")
+            export_gltf(build["solid"], str(base) + "_AI.glb", binary=True)
             rec["status"] = "built" if v["brep_valid"] else "built_invalid"
-        except SpecBuildError as e:
-            rec["status"] = "interpreted_only"
-            rec["build_error"] = str(e)
-        except Exception as e:
-            rec["status"] = "build_failed"
-            rec["build_error"] = f"{type(e).__name__}: {e}"
+        else:
+            kind, msg = build["error"]
+            rec["status"] = "interpreted_only" if kind == "spec" else "build_failed"
+            rec["build_error"] = msg
     except Exception as e:
         rec["status"] = "error"
         rec["error"] = f"{type(e).__name__}: {str(e)[:300]}"

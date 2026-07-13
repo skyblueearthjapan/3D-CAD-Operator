@@ -51,8 +51,8 @@ def start_job(files: list[Path], out_root: Path, label: str) -> dict:
 def _worker(job: dict, files: list[Path], out_dir: Path):
     from build123d import export_gltf, export_step
 
-    from .ai_interpreter import (SpecBuildError, build_from_spec, compare_specs,
-                                 gemini_cross_check, generate_dump, interpret, verify)
+    from .ai_interpreter import (build_pass_with_fix, compare_specs,
+                                 gemini_cross_check, generate_dump, interpret)
     from .dxf_parser import DxfDocument
 
     for p in files:
@@ -85,22 +85,26 @@ def _worker(job: dict, files: list[Path], out_dir: Path):
             rec["drawing_conflicts"] = spec.drawing_conflicts
             if spec.unsupported_reason:
                 rec["reason"] = spec.unsupported_reason
-            try:
-                solid = build_from_spec(spec)
-                v = verify(solid, spec, doc)
+            spec, build = build_pass_with_fix(spec, doc)
+            if build.get("auto_fix"):
+                rec["auto_fix"] = build["auto_fix"][:300]
+            if build["solid"] is not None:
+                v = build["verification"]
                 base = _safe(p.stem)
-                export_step(solid, str(out_dir / f"{base}_AI.step"))
-                export_gltf(solid, str(out_dir / f"{base}_AI.glb"), binary=True)
+                export_step(build["solid"], str(out_dir / f"{base}_AI.step"))
+                export_gltf(build["solid"], str(out_dir / f"{base}_AI.glb"), binary=True)
                 rec["verification"] = v
                 rec["step"] = f"{base}_AI.step"
                 rec["glb"] = f"{base}_AI.glb"
                 rec["status"] = "built" if v["brep_valid"] else "built_invalid"
-            except SpecBuildError as e:
-                rec["status"] = "interpreted_only"
-                rec["error"] = (spec.unsupported_reason or str(e))[:300]
-            except Exception as e:
-                rec["status"] = "build_failed"
-                rec["error"] = f"{type(e).__name__}: {str(e)[:200]}"
+            else:
+                kind, msg = build["error"]
+                if kind == "spec":
+                    rec["status"] = "interpreted_only"
+                    rec["error"] = (spec.unsupported_reason or msg)[:300]
+                else:
+                    rec["status"] = "build_failed"
+                    rec["error"] = msg[:200]
         except StopIteration:
             pass
         except Exception as e:
