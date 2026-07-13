@@ -29,6 +29,17 @@ export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onB
     });
   };
 
+  const checkedInFolder = data?.files.filter((f) => checked.has(f.path)).length ?? 0;
+
+  // 今見ているフォルダ内のチェックだけを解除 (他フォルダの選択は保持)
+  const clearFolderChecks = () => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      data?.files.forEach((f) => next.delete(f.path));
+      return next;
+    });
+  };
+
   const allInFolderChecked =
     !!data?.files.length && data.files.every((f) => checked.has(f.path));
   const toggleFolderAll = () => {
@@ -107,9 +118,23 @@ export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onB
           >
             {bulkRunning ? "一括3D化 実行中…" : `✅ 選択した ${checked.size} 件を一括3D化`}
           </button>
-          <button className="btn-ghost clear-check" onClick={() => setChecked(new Set())}>
-            選択解除
-          </button>
+          <div className="clear-check-row">
+            <button
+              className="btn-ghost clear-check"
+              disabled={checkedInFolder === 0}
+              onClick={clearFolderChecks}
+              title="今開いているフォルダ内のチェックだけを外します (他フォルダの選択は残ります)"
+            >
+              このフォルダの選択解除{checkedInFolder > 0 ? ` (${checkedInFolder})` : ""}
+            </button>
+            <button
+              className="btn-ghost clear-check"
+              onClick={() => setChecked(new Set())}
+              title="全フォルダのチェックをすべて外します"
+            >
+              すべて解除
+            </button>
+          </div>
         </div>
       ) : (
         <button

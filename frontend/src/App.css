@@ -208,7 +208,9 @@ body {
 }
 .region-bar .region-go { width: auto; padding: 6px 14px; font-size: 12px; }
 .bulk-select-box .bulk-selected { border-width: 2px; font-weight: 600; }
-.clear-check { font-size: 11px; color: var(--text-dim); align-self: center; }
+.clear-check { font-size: 11px; color: var(--text-dim); }
+.clear-check:disabled { opacity: 0.4; }
+.clear-check-row { display: flex; justify-content: center; gap: 10px; }
 
 /* ---------------- 中央 ---------------- */
 .center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
