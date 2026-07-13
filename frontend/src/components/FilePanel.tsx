@@ -12,6 +12,7 @@ interface Props {
   bulkRunning: boolean;
   generatingNames: Set<string>;                 // いま生成中のファイル名
   bulkFileStatus: Record<string, string>;       // 今回の一括ジョブの処理結果 (name→status)
+  refreshKey: number;                           // 生成完了時にインクリメント→一覧再読込
 }
 
 const BULK_MARK: Record<string, { icon: string; cls: string; label: string }> = {
@@ -25,7 +26,7 @@ const BULK_MARK: Record<string, { icon: string; cls: string; label: string }> = 
 };
 
 /** 左パネル: サーバフォルダブラウズ + ドラッグ&ドロップ + 一括3D化 (フォルダ/選択ファイル) */
-export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onBulkStart, onBulkStartFiles, bulkRunning, generatingNames, bulkFileStatus }: Props) {
+export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onBulkStart, onBulkStartFiles, bulkRunning, generatingNames, bulkFileStatus, refreshKey }: Props) {
   const [path, setPath] = useState("");
   const [data, setData] = useState<BrowseResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -78,6 +79,12 @@ export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onB
   }, []);
 
   useEffect(() => { load(""); }, [load]);
+
+  // 生成完了 → 生成済みマークを最新化 (現フォルダを再読込)
+  useEffect(() => {
+    if (refreshKey > 0) load(path);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   const up = () => {
     if (!path) return;
@@ -180,6 +187,11 @@ export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onB
         {data?.files.map((f) => {
           const generating = generatingNames.has(f.name);
           const mark = !generating ? BULK_MARK[bulkFileStatus[f.name] ?? ""] : undefined;
+          const genMark = !generating && !mark && f.gen
+            ? (f.gen === "3d"
+              ? { icon: "✓", cls: "ok", label: "生成済み3Dあり (開くと自動復元されます)" }
+              : { icon: "－", cls: "dim", label: "AI解釈のみ実施済み (3Dは未生成)" })
+            : undefined;
           return (
             <div key={f.path} className="file-row">
               <input
@@ -194,7 +206,10 @@ export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onB
                 className={`file-item ${currentName === f.name ? "active" : ""} ${generating ? "generating" : ""}`}
                 disabled={busy}
                 onClick={() => onOpenPath(f.path)}
-                title={generating ? `${f.name} — AI生成中…` : mark ? `${f.name} — ${mark.label}` : f.name}
+                title={generating ? `${f.name} — AI生成中…`
+                  : mark ? `${f.name} — ${mark.label}`
+                  : genMark ? `${f.name} — ${genMark.label}`
+                  : f.name}
               >
                 <span className="fi-icon">📐</span>
                 <span className="fi-name">{f.name}</span>
@@ -202,6 +217,8 @@ export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onB
                   <span className="fi-gen" title="AI生成中">⚙</span>
                 ) : mark ? (
                   <span className={`fi-mark ${mark.cls}`}>{mark.icon}</span>
+                ) : genMark ? (
+                  <span className={`fi-mark ${genMark.cls}`}>{genMark.icon}</span>
                 ) : (
                   <span className="fi-size">{fmtSize(f.size)}</span>
                 )}

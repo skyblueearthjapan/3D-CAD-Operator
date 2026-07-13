@@ -48,7 +48,7 @@ export interface BrowseResult {
   root: string;
   exists: boolean;
   dirs: { name: string; path: string }[];
-  files: { name: string; path: string; size: number }[];
+  files: { name: string; path: string; size: number; gen?: "3d" | "interpreted" | null }[];
 }
 
 export interface ModelResult {

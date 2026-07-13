@@ -77,8 +77,21 @@ def browse(path: str = ""):
         if p.is_dir():
             dirs.append({"name": p.name, "path": rel})
         elif p.suffix.lower() == ".dxf":
-            files.append({"name": p.name, "path": rel, "size": p.stat().st_size})
+            files.append({"name": p.name, "path": rel, "size": p.stat().st_size,
+                          "gen": _cache_state(rel)})
     return {"root": str(DXF_ROOT), "dirs": dirs, "files": files, "exists": True}
+
+
+def _cache_state(relpath: str) -> str | None:
+    """保存済み生成結果の状態: '3d'=3Dモデルあり / 'interpreted'=解釈のみ / None=未生成。"""
+    f = CACHE_ROOT / _cache_slug(relpath) / "result.json"
+    if not f.exists():
+        return None
+    try:
+        r = json.loads(f.read_text(encoding="utf-8"))
+        return "3d" if r.get("glb") else "interpreted"
+    except Exception:
+        return None
 
 
 class OpenReq(BaseModel):

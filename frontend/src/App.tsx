@@ -24,6 +24,7 @@ export default function App() {
   const [aiElapsed, setAiElapsed] = useState(0);
   const [regionMode, setRegionMode] = useState(false);
   const [region, setRegion] = useState<[number, number, number, number] | null>(null);
+  const [fileRefresh, setFileRefresh] = useState(0); // 生成完了時に左パネルを再読込
   const [bulkJob, setBulkJob] = useState<BulkJob | null>(null);
   const [tab, setTab] = useState<Tab>("2d");
   const [busy, setBusy] = useState(false);
@@ -205,6 +206,7 @@ export default function App() {
     try {
       const r = await aiInterpret(doc.session, false, reg ?? null);
       setAiResult(r);
+      setFileRefresh((n) => n + 1);
       if (r.buildable && r.glb) {
         setTab("3d");
         const n = r.spec.assumptions.length + r.spec.drawing_conflicts.length;
@@ -268,6 +270,7 @@ export default function App() {
         if (!j.running) {
           const built = j.results.filter((r) => r.status === "built").length;
           showToast("ok", `一括3D化が完了しました: ${built}/${j.total} 件を3D化`);
+          setFileRefresh((n) => n + 1);
         }
       } catch {
         /* サーバー再起動等は次のポーリングで回復 */
@@ -336,6 +339,7 @@ export default function App() {
           bulkRunning={!!bulkJob?.running}
           generatingNames={generatingNames}
           bulkFileStatus={bulkFileStatus}
+          refreshKey={fileRefresh}
         />
 
         <main className="center">
