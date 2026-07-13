@@ -215,6 +215,19 @@ body {
 .file-select-all input { accent-color: var(--accent); cursor: pointer; }
 .bulk-select-box { display: flex; flex-direction: column; gap: 4px; }
 
+/* タブの生成状態バッジ */
+.tab-badge {
+  margin-left: 7px;
+  padding: 1px 7px;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+.tab-badge.ok { background: rgba(46, 158, 91, 0.14); color: #2e9e5b; }
+.tab-badge.err { background: rgba(192, 90, 78, 0.13); color: #c05a4e; }
+.tab-badge.dim { background: var(--panel2); color: var(--text-dim); font-weight: 400; }
+
 /* 領域指定解釈のバー (2Dビュー上部オーバーレイ) */
 .region-bar {
   position: absolute;

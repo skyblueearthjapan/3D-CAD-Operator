@@ -347,8 +347,22 @@ export default function App() {
               className={tab === "3d" ? "tab active" : "tab"}
               onClick={() => setTab("3d")}
               disabled={!aiResult?.glb && !result}
+              title={
+                aiResult?.glb || result
+                  ? `この図面の3Dモデルは生成済みです${aiResult?.cached_at ? ` (${aiResult.cached_at.replace("T", " ")})` : ""}`
+                  : aiResult
+                    ? "解釈は完了しましたが3Dは未生成です (理由は右パネル参照)"
+                    : "まだ生成していません — 右の「⚙ 生成 (AI解釈)」で3D化できます"
+              }
             >
               モデル (3D)
+              {aiResult?.glb || result ? (
+                <span className="tab-badge ok">✓ 生成済み</span>
+              ) : aiResult ? (
+                <span className="tab-badge err">未生成</span>
+              ) : (
+                <span className="tab-badge dim">未生成</span>
+              )}
             </button>
             {bulkJob && (
               <button
