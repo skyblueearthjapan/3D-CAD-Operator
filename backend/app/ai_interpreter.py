@@ -475,8 +475,12 @@ def build_from_spec(spec: ShapeSpec):
         (" / 未対応特徴: " + "; ".join(spec.unmodeled_features) if spec.unmodeled_features else ""))
 
 
-def verify(solid, spec: ShapeSpec) -> dict:
-    """BRepCheck + バウンディングボックス照合 + 健全性チェック。"""
+def verify(solid, spec: ShapeSpec, dxfdoc=None) -> dict:
+    """BRepCheck + バウンディングボックス照合 + 健全性チェック + 2D投影照合。
+
+    dxfdoc を渡すと投影照合 (生成ソリッドのXY投影 vs 図面の検出輪郭) も実施し、
+    不一致は dimension_warnings に加わる → 品質フォールバックの判定にも効く。
+    """
     from OCP.BRepCheck import BRepCheck_Analyzer
     ok = BRepCheck_Analyzer(solid.wrapped).IsValid()
     bb = solid.bounding_box()
@@ -519,22 +523,31 @@ def verify(solid, spec: ShapeSpec) -> dict:
             checks.append(f"長さ不一致: spec={spec.length} bbox={bb.size.X:.2f}")
         if not close(spec.width, bb.size.Y):
             checks.append(f"幅不一致: spec={spec.width} bbox={bb.size.Y:.2f}")
+    projection = None
+    if dxfdoc is not None:
+        try:
+            from .projection_check import check_projection
+            projection = check_projection(solid, spec, dxfdoc)
+            checks.extend(projection["warnings"])
+        except Exception as e:  # 照合自体の失敗で本処理を止めない
+            projection = {"status": "error", "warnings": [], "error": str(e)[:200]}
     return {
         "brep_valid": bool(ok),
         "volume_mm3": round(solid.volume, 1),
         "bbox": [round(bb.size.X, 2), round(bb.size.Y, 2), round(bb.size.Z, 2)],
         "dimension_warnings": checks,
+        "projection": projection,
     }
 
 
 # ------------------------------------------------------------------ 一括実行
 
-def _build_pass(spec: ShapeSpec) -> dict:
+def _build_pass(spec: ShapeSpec, dxfdoc=None) -> dict:
     """ビルド+検証を1回試行し、結果を辞書で返す (solid含む)。"""
     out: dict = {"solid": None, "verification": None, "error": None, "ok": False}
     try:
         solid = build_from_spec(spec)
-        v = verify(solid, spec)
+        v = verify(solid, spec, dxfdoc)
         out["solid"] = solid
         out["verification"] = v
         out["ok"] = v["brep_valid"] and not v["dimension_warnings"]
@@ -556,7 +569,7 @@ def run_interpret(dxfdoc, out_dir, base_name: str, sid: str,
     from pathlib import Path
     dump = generate_dump(dxfdoc)
     spec, usage = interpret(dump)
-    build = _build_pass(spec)
+    build = _build_pass(spec, dxfdoc)
 
     # ---- 品質フォールバック: 検証警告ありなら別エンジンで再解釈して比較
     used = usage.get("model", "")
@@ -565,7 +578,7 @@ def run_interpret(dxfdoc, out_dir, base_name: str, sid: str,
     if (not build["ok"]) and build["error"] is None and os.environ.get(other_key):
         try:
             spec2, usage2 = interpret(dump, force=other)
-            build2 = _build_pass(spec2)
+            build2 = _build_pass(spec2, dxfdoc)
             if build2["ok"] or (build2["verification"] and not build["verification"]):
                 warn = (build["verification"] or {}).get("dimension_warnings", [])
                 usage2["fallback_reason"] = (

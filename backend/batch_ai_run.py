@@ -59,7 +59,7 @@ def process(p: Path) -> dict:
         rec["usage"] = usage
         try:
             solid = build_from_spec(spec)
-            v = verify(solid, spec)
+            v = verify(solid, spec, doc)
             rec["verification"] = v
             from build123d import export_gltf, export_step
             base = MODELS / slug(p).replace(".dxf", "")

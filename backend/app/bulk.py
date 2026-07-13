@@ -87,7 +87,7 @@ def _worker(job: dict, files: list[Path], out_dir: Path):
                 rec["reason"] = spec.unsupported_reason
             try:
                 solid = build_from_spec(spec)
-                v = verify(solid, spec)
+                v = verify(solid, spec, doc)
                 base = _safe(p.stem)
                 export_step(solid, str(out_dir / f"{base}_AI.step"))
                 export_gltf(solid, str(out_dir / f"{base}_AI.glb"), binary=True)
