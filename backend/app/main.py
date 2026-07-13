@@ -174,6 +174,7 @@ def model(req: ModelReq):
 class AiInterpretReq(BaseModel):
     session: str
     cross_check: bool = False   # Gemini第二意見 (GEMINI_API_KEY 設定時のみ有効)
+    region: list[float] | None = None  # [x0,y0,x1,y1] 図面座標。指定時は範囲内のみ解釈
 
 
 # 生成結果の永続保存: DXFごとに最後の生成結果を保持し、開き直したとき復元する
@@ -231,7 +232,7 @@ def ai_interpret(req: AiInterpretReq):
     try:
         base = Path(s["name"]).stem or "model"
         result = run_interpret(s["doc"], s["dir"], base, req.session,
-                               cross_check=req.cross_check)
+                               cross_check=req.cross_check, region=req.region)
     except Exception as e:
         raise HTTPException(500, f"AI解釈エラー: {e}")
     if s.get("relpath"):

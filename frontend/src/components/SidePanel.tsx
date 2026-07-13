@@ -18,6 +18,7 @@ interface Props {
   hasDoc: boolean;
   // AI 解釈
   onAiBuild: () => void;
+  onRegionMode: () => void;
   aiBusy: boolean;
   aiResult: AiResult | null;
 }
@@ -67,6 +68,15 @@ export default function SidePanel(p: Props) {
           onClick={p.onAiBuild}
         >
           {p.aiBusy ? "AI解釈中… (30〜90秒)" : "⚙ 生成 (AI解釈)"}
+        </button>
+        <button
+          className="btn-secondary"
+          style={{ marginTop: 6 }}
+          disabled={!p.hasDoc || p.aiBusy}
+          onClick={p.onRegionMode}
+          title="複数の部品が1枚に描かれた図面などで、解釈したい部品のビューだけをドラッグで囲んで指定します"
+        >
+          🔲 範囲を選んでAI解釈
         </button>
       </section>
 

@@ -52,11 +52,15 @@ export async function getCachedResult(
   return jsonOrThrow(res);
 }
 
-export async function aiInterpret(session: string, crossCheck: boolean): Promise<AiResult> {
+export async function aiInterpret(
+  session: string,
+  crossCheck: boolean,
+  region?: [number, number, number, number] | null,
+): Promise<AiResult> {
   const res = await fetch("/api/ai_interpret", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session, cross_check: crossCheck }),
+    body: JSON.stringify({ session, cross_check: crossCheck, region: region ?? null }),
   });
   return jsonOrThrow(res);
 }

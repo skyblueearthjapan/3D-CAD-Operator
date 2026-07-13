@@ -151,6 +151,7 @@ export interface AiResult {
   build_error: string | null;
   cross_check_auto: boolean;
   auto_fix?: string | null;
+  region?: number[] | null; // 領域指定解釈の場合の選択範囲 [x0,y0,x1,y1]
   cached_at?: string;      // 保存済み結果を復元した場合の生成日時
   source_path?: string;
 }

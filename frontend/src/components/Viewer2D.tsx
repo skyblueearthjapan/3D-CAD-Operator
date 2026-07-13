@@ -11,6 +11,10 @@ interface Props {
   candidateHoles: Set<number>;
   onSelectOuter: (id: number) => void;
   onToggleHole: (id: number) => void;
+  // 領域指定解釈: regionMode中はドラッグ=矩形選択 (パン無効)
+  regionMode?: boolean;
+  region?: [number, number, number, number] | null;
+  onRegionSelected?: (r: [number, number, number, number]) => void;
 }
 
 interface ViewBox {
@@ -25,12 +29,15 @@ export default function Viewer2D({
   display, visibleLayers, bbox, loops,
   selectedOuter, selectedHoles, candidateHoles,
   onSelectOuter, onToggleHole,
+  regionMode = false, region = null, onRegionSelected,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [vb, setVb] = useState<ViewBox>({ x: 0, y: 0, w: 100, h: 100 });
   const [hovered, setHovered] = useState<number | null>(null);
   const drag = useRef<{ x: number; y: number; vb: ViewBox } | null>(null);
   const moved = useRef(false);
+  const selStart = useRef<{ x: number; y: number } | null>(null);
+  const [selRect, setSelRect] = useState<[number, number, number, number] | null>(null);
 
   const fit = useCallback(() => {
     const [x0, y0, x1, y1] = bbox;
@@ -62,12 +69,29 @@ export default function Viewer2D({
     }));
   }, [clientToModel]);
 
+  // クライアント座標 → 図面(モデル)座標 (viewBoxのyは反転域なので符号を戻す)
+  const clientToDrawing = useCallback((cx: number, cy: number) => {
+    const { px, py } = clientToModel(cx, cy);
+    return { x: px, y: -py };
+  }, [clientToModel]);
+
   const onPointerDown = (e: React.PointerEvent) => {
     (e.target as Element).setPointerCapture?.(e.pointerId);
+    if (regionMode) {
+      selStart.current = clientToDrawing(e.clientX, e.clientY);
+      setSelRect(null);
+      return;
+    }
     drag.current = { x: e.clientX, y: e.clientY, vb };
     moved.current = false;
   };
   const onPointerMove = (e: React.PointerEvent) => {
+    if (regionMode && selStart.current) {
+      const p = clientToDrawing(e.clientX, e.clientY);
+      const s = selStart.current;
+      setSelRect([Math.min(s.x, p.x), Math.min(s.y, p.y), Math.max(s.x, p.x), Math.max(s.y, p.y)]);
+      return;
+    }
     if (!drag.current) return;
     const svg = svgRef.current!;
     const r = svg.getBoundingClientRect();
@@ -78,7 +102,17 @@ export default function Viewer2D({
     }
     setVb({ ...drag.current.vb, x: drag.current.vb.x - dx, y: drag.current.vb.y - dy });
   };
-  const onPointerUp = () => { drag.current = null; };
+  const onPointerUp = () => {
+    if (regionMode && selStart.current) {
+      if (selRect && selRect[2] - selRect[0] > 2 && selRect[3] - selRect[1] > 2) {
+        onRegionSelected?.(selRect);
+      }
+      selStart.current = null;
+      setSelRect(null);
+      return;
+    }
+    drag.current = null;
+  };
 
   const strokeScale = vb.w / 1000; // 表示幅基準の線幅
 
@@ -110,6 +144,7 @@ export default function Viewer2D({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         preserveAspectRatio="xMidYMid meet"
+        style={regionMode ? { cursor: "crosshair" } : undefined}
       >
         <g transform="scale(1,-1)">
           {/* 図面エンティティ */}
@@ -139,6 +174,21 @@ export default function Viewer2D({
               {d.text}
             </text>
           ))}
+          {/* 領域選択の矩形 (ドラッグ中 or 確定済み) */}
+          {(selRect || region) && (() => {
+            const rr = (selRect ?? region)!;
+            return (
+              <rect
+                x={rr[0]} y={rr[1]} width={rr[2] - rr[0]} height={rr[3] - rr[1]}
+                fill="rgba(47,111,191,0.08)"
+                stroke="#2f6fbf"
+                strokeWidth={1.6}
+                strokeDasharray="6 4"
+                vectorEffect="non-scaling-stroke"
+                pointerEvents="none"
+              />
+            );
+          })()}
           {/* 輪郭オーバーレイ */}
           {loops.map(l => {
             const isOuter = l.id === selectedOuter;
@@ -164,7 +214,7 @@ export default function Viewer2D({
                 onPointerEnter={() => setHovered(l.id)}
                 onPointerLeave={() => setHovered(h => (h === l.id ? null : h))}
                 onClick={(e) => {
-                  if (moved.current) return;
+                  if (moved.current || regionMode) return;
                   e.stopPropagation();
                   if (selectedOuter !== null && (candidateHoles.has(l.id) || selectedHoles.has(l.id))) {
                     onToggleHole(l.id);

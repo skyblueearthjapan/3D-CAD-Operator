@@ -22,6 +22,8 @@ export default function App() {
   const [aiResult, setAiResult] = useState<AiResult | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiElapsed, setAiElapsed] = useState(0);
+  const [regionMode, setRegionMode] = useState(false);
+  const [region, setRegion] = useState<[number, number, number, number] | null>(null);
   const [bulkJob, setBulkJob] = useState<BulkJob | null>(null);
   const [tab, setTab] = useState<Tab>("2d");
   const [busy, setBusy] = useState(false);
@@ -61,6 +63,8 @@ export default function App() {
     setAiResult(null);
     setSelectedOuter(null);
     setSelectedHoles(new Set());
+    setRegionMode(false);
+    setRegion(null);
     setTab("2d");
     const all = new Set(r.layers.map((l) => l.name));
     setVisibleLayers(all);
@@ -194,12 +198,12 @@ export default function App() {
     }
   }, [doc, selectedOuter, selectedHoles, thickness, mode]);
 
-  // ---- AI 解釈 → 3D 生成 (メインフロー)
-  const onAiBuild = useCallback(async () => {
+  // ---- AI 解釈 → 3D 生成 (メインフロー。reg指定時は範囲内のみ解釈)
+  const onAiBuild = useCallback(async (reg?: [number, number, number, number] | null) => {
     if (!doc) return;
     setAiBusy(true);
     try {
-      const r = await aiInterpret(doc.session, false);
+      const r = await aiInterpret(doc.session, false, reg ?? null);
       setAiResult(r);
       if (r.buildable && r.glb) {
         setTab("3d");
@@ -339,6 +343,30 @@ export default function App() {
             )}
           </div>
           <div className="view-area">
+            {tab === "2d" && doc && (regionMode || region) && (
+              <div className="region-bar">
+                {!region ? (
+                  <span>🔲 解釈したい部品のビュー(複数可)をドラッグで囲んでください</span>
+                ) : (
+                  <>
+                    <span>選択: {Math.round(region[2] - region[0])}×{Math.round(region[3] - region[1])} mm</span>
+                    <button
+                      className="btn-primary region-go"
+                      disabled={aiBusy}
+                      onClick={() => { setRegionMode(false); onAiBuild(region); }}
+                    >
+                      ⚙ この範囲をAI解釈
+                    </button>
+                    <button className="btn-ghost" onClick={() => { setRegion(null); setRegionMode(true); }}>
+                      やり直し
+                    </button>
+                  </>
+                )}
+                <button className="btn-ghost" onClick={() => { setRegionMode(false); setRegion(null); }}>
+                  ✕ やめる
+                </button>
+              </div>
+            )}
             {busy && <div className="loading-overlay"><div className="spinner" />読み込み中…</div>}
             {aiBusy && (
               <div className="loading-overlay ai-working">
@@ -371,6 +399,9 @@ export default function App() {
                   candidateHoles={candidateHoles}
                   onSelectOuter={onSelectOuter}
                   onToggleHole={onToggleHole}
+                  regionMode={regionMode && !region}
+                  region={region}
+                  onRegionSelected={(r) => setRegion(r)}
                 />
               ) : (
                 <div className="welcome">
@@ -404,7 +435,8 @@ export default function App() {
           building={building}
           result={result}
           hasDoc={!!doc}
-          onAiBuild={onAiBuild}
+          onAiBuild={() => onAiBuild(null)}
+          onRegionMode={() => { setRegion(null); setRegionMode(true); setTab("2d"); }}
           aiBusy={aiBusy}
           aiResult={aiResult}
         />

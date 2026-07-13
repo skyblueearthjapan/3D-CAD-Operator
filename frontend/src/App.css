@@ -187,6 +187,26 @@ body {
 }
 .file-select-all input { accent-color: var(--accent); cursor: pointer; }
 .bulk-select-box { display: flex; flex-direction: column; gap: 4px; }
+
+/* 領域指定解釈のバー (2Dビュー上部オーバーレイ) */
+.region-bar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1.5px solid var(--accent);
+  border-radius: 9px;
+  padding: 7px 12px;
+  box-shadow: 0 3px 14px rgba(20, 50, 90, 0.13);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.region-bar .region-go { width: auto; padding: 6px 14px; font-size: 12px; }
 .bulk-select-box .bulk-selected { border-width: 2px; font-weight: 600; }
 .clear-check { font-size: 11px; color: var(--text-dim); align-self: center; }
 
@@ -221,6 +241,7 @@ body {
 
 .view-area {
   flex: 1;
+  position: relative;
   margin: 0 12px 12px;
   background: var(--panel);
   border: 1px solid var(--line);

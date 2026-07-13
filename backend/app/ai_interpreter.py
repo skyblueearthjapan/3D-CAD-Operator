@@ -259,18 +259,58 @@ revolved の付加特徴(半径方向穴・キー溝)の読み方:
 
 # ------------------------------------------------------------------ ダンプ生成
 
-def generate_dump(dxfdoc) -> str:
-    """DxfDocument (ezdxf doc/msp保持) からAI入力用エンティティダンプを生成。"""
+def generate_dump(dxfdoc, region: list[float] | None = None) -> str:
+    """DxfDocument (ezdxf doc/msp保持) からAI入力用エンティティダンプを生成。
+
+    region=[x0,y0,x1,y1] (図面座標) を渡すと、その範囲内のエンティティのみを対象にする
+    (複数部品が1枚に描かれた図面で、1部品分のビューだけを解釈させる用途)。
+    範囲外の注記は「参考」として区別して添付する (表題欄の材質等を失わないため)。
+    """
     msp = dxfdoc.msp
+    if region:
+        rx0, rx1 = sorted((float(region[0]), float(region[2])))
+        ry0, ry1 = sorted((float(region[1]), float(region[3])))
+
+    def _pt_in(x: float, y: float) -> bool:
+        return (not region) or (rx0 <= x <= rx1 and ry0 <= y <= ry1)
+
+    def _ent_in(e) -> bool:
+        if not region:
+            return True
+        try:
+            t = e.dxftype()
+            if t in ("CIRCLE", "ARC"):
+                c = e.dxf.center
+                return _pt_in(c.x, c.y)
+            if t == "LINE":
+                s, en = e.dxf.start, e.dxf.end
+                return _pt_in(s.x, s.y) or _pt_in(en.x, en.y)
+            if t in ("LWPOLYLINE", "POLYLINE"):
+                return any(_pt_in(p[0], p[1]) for p in e.get_points())
+            if t in ("TEXT", "MTEXT"):
+                p = e.dxf.insert
+                return _pt_in(p.x, p.y)
+            if t == "DIMENSION":
+                tm = e.dxf.text_midpoint
+                return _pt_in(tm.x, tm.y)
+        except Exception:
+            return False
+        return True
+
     out: list[str] = []
     w = out.append
+    if region:
+        w(f"-- 領域指定解釈: ユーザーが選択した範囲 ({rx0:.0f},{ry0:.0f})-({rx1:.0f},{ry1:.0f}) 内の"
+          "エンティティのみを掲載。この範囲に描かれた部品を単品として解釈すること。"
+          "範囲外の注記は末尾に参考として添付する(他部品の注記が混在し得るので鵜呑みにしない)")
 
-    cnt = Counter((e.dxftype(), e.dxf.layer, e.dxf.get("linetype", "BYLAYER")) for e in msp)
+    cnt = Counter((e.dxftype(), e.dxf.layer, e.dxf.get("linetype", "BYLAYER"))
+                  for e in msp if _ent_in(e))
     w("-- counts (type, layer, linetype):")
     for (t, layer, lt), n in sorted(cnt.items(), key=lambda x: -x[1]):
         w(f"   {t:12s} L={layer:10s} lt={lt:12s} x{n}")
 
-    circles = list(msp.query("CIRCLE"))
+    circles = [e for e in msp.query("CIRCLE") if _ent_in(e)]
     w(f"-- CIRCLE ({len(circles)}):")
     for e in circles[:250]:
         c = e.dxf.center
@@ -278,7 +318,7 @@ def generate_dump(dxfdoc) -> str:
     if len(circles) > 250:
         w(f"   ... (残り{len(circles) - 250}件省略)")
 
-    arcs = list(msp.query("ARC"))
+    arcs = [e for e in msp.query("ARC") if _ent_in(e)]
     w(f"-- ARC ({len(arcs)}):")
     for e in arcs[:80]:
         c = e.dxf.center
@@ -286,7 +326,7 @@ def generate_dump(dxfdoc) -> str:
           f"a={e.dxf.start_angle:.1f}..{e.dxf.end_angle:.1f} lt={e.dxf.get('linetype','BYLAYER')} L={e.dxf.layer}")
 
     w("-- LWPOLYLINE:")
-    for e in list(msp.query("LWPOLYLINE"))[:120]:
+    for e in [e for e in msp.query("LWPOLYLINE") if _ent_in(e)][:120]:
         pts = [(round(p[0], 2), round(p[1], 2)) for p in e.get_points()]
         head = f"   n={len(pts)} closed={e.closed} lt={e.dxf.get('linetype','BYLAYER')} L={e.dxf.layer} "
         if len(pts) <= 16:
@@ -295,7 +335,7 @@ def generate_dump(dxfdoc) -> str:
             xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
             w(head + f"bbox=({min(xs):.1f},{min(ys):.1f})-({max(xs):.1f},{max(ys):.1f})")
 
-    lines = list(msp.query("LINE"))
+    lines = [e for e in msp.query("LINE") if _ent_in(e)]
     w(f"-- LINE ({len(lines)}):")
     for e in lines[:300]:
         s, t = e.dxf.start, e.dxf.end
@@ -303,19 +343,28 @@ def generate_dump(dxfdoc) -> str:
 
     w("-- NOTES:")
     note_count = 0
+    outside_notes: list[str] = []
     for e in msp:
         if e.dxftype() in ("TEXT", "MTEXT"):
             raw = e.dxf.text if e.dxftype() == "TEXT" else e.text
             clean = re.sub(r"\\[A-Za-z][0-9.]*;?|[{}]|\\P", "|", raw or "").strip("| ")
-            if clean:
-                w(f"   {clean[:100]}")
-                note_count += 1
-                if note_count >= 250:
-                    w("   ... (以降の注記省略)")
-                    break
+            if not clean:
+                continue
+            if _ent_in(e):
+                if note_count < 250:
+                    w(f"   {clean[:100]}")
+                    note_count += 1
+                    if note_count == 250:
+                        w("   ... (以降の注記省略)")
+            elif region and len(outside_notes) < 40:
+                outside_notes.append(clean[:100])
+    if outside_notes:
+        w("-- NOTES(選択領域外・参考。表題欄/部品表/他部品の注記が混在し得る):")
+        for t in outside_notes:
+            w(f"   {t}")
 
     w("-- DIMENSION:")
-    for e in list(msp.query("DIMENSION"))[:150]:
+    for e in [e for e in msp.query("DIMENSION") if _ent_in(e)][:150]:
         try:
             m = round(e.get_measurement(), 3)
         except Exception:
@@ -887,18 +936,35 @@ def build_pass_with_fix(spec: ShapeSpec, dxfdoc=None) -> tuple[ShapeSpec, dict]:
     return spec, build
 
 
+class _RegionDoc:
+    """選択領域内のセグメントだけを見せる DxfDocument のビュー (投影照合・穴吸着用)。"""
+
+    def __init__(self, doc, region: list[float]):
+        rx0, rx1 = sorted((float(region[0]), float(region[2])))
+        ry0, ry1 = sorted((float(region[1]), float(region[3])))
+
+        def inside(s):
+            pts = [s.center] if s.kind in ("arc", "circle") else [s.p0, s.p1]
+            return any(rx0 <= x <= rx1 and ry0 <= y <= ry1 for x, y in pts)
+
+        self.msp = doc.msp
+        self.segments = [s for s in doc.segments if inside(s)]
+
+
 def run_interpret(dxfdoc, out_dir, base_name: str, sid: str,
-                  cross_check: bool = False) -> dict:
+                  cross_check: bool = False, region: list[float] | None = None) -> dict:
     """ダンプ→解釈→ビルド→検証→エクスポート。
 
     品質チェックNG (検証警告・極小体積) の場合、もう片方のエンジンで1回だけ再解釈し、
     良い方の結果を採用する (エンジン間の得手不得手を自動吸収)。
+    region 指定時は選択範囲内のエンティティのみで解釈・照合する (複数部品シート用)。
     """
     import json as _json
     from pathlib import Path
-    dump = generate_dump(dxfdoc)
+    dump = generate_dump(dxfdoc, region=region)
+    check_doc = _RegionDoc(dxfdoc, region) if region else dxfdoc
     spec, usage = interpret(dump)
-    spec, build = build_pass_with_fix(spec, dxfdoc)
+    spec, build = build_pass_with_fix(spec, check_doc)
 
     # ---- 品質フォールバック: 検証警告ありなら別エンジンで再解釈して比較
     used = usage.get("model", "")
@@ -907,7 +973,7 @@ def run_interpret(dxfdoc, out_dir, base_name: str, sid: str,
     if (not build["ok"]) and build["error"] is None and os.environ.get(other_key):
         try:
             spec2, usage2 = interpret(dump, force=other)
-            spec2, build2 = build_pass_with_fix(spec2, dxfdoc)
+            spec2, build2 = build_pass_with_fix(spec2, check_doc)
             if build2["ok"] or (build2["verification"] and not build["verification"]):
                 warn = (build["verification"] or {}).get("dimension_warnings", [])
                 usage2["fallback_reason"] = (
@@ -935,6 +1001,7 @@ def run_interpret(dxfdoc, out_dir, base_name: str, sid: str,
         "verification": build["verification"],
         "build_error": None,
         "auto_fix": build.get("auto_fix"),
+        "region": region,
         "cross_check_auto": bool(uncertain and not cross_check and gemini is not None),
     }
     out_dir = Path(out_dir)
