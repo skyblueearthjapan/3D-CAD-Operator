@@ -21,6 +21,8 @@ export default function App() {
   const [result, setResult] = useState<ModelResult | null>(null);
   const [aiResult, setAiResult] = useState<AiResult | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
+  // 生成中の対象 (開いている図面を切り替えても生成対象は変わらない)
+  const [aiTarget, setAiTarget] = useState<{ session: string; name: string } | null>(null);
   const [aiElapsed, setAiElapsed] = useState(0);
   const [regionMode, setRegionMode] = useState(false);
   const [region, setRegion] = useState<[number, number, number, number] | null>(null);
@@ -31,6 +33,8 @@ export default function App() {
   const [building, setBuilding] = useState(false);
   const [toast, setToast] = useState<{ kind: "err" | "ok"; msg: string } | null>(null);
   const autoBuildRef = useRef(false);
+  const docRef = useRef<ParseResult | null>(null);
+  useEffect(() => { docRef.current = doc; }, [doc]);
 
   const showToast = (kind: "err" | "ok", msg: string) => {
     setToast({ kind, msg });
@@ -200,13 +204,24 @@ export default function App() {
   }, [doc, selectedOuter, selectedHoles, thickness, mode]);
 
   // ---- AI 解釈 → 3D 生成 (メインフロー。reg指定時は範囲内のみ解釈)
+  // 生成は開始時点の図面 (target) に対して行われ、途中で別の図面を開いても対象は変わらない。
   const onAiBuild = useCallback(async (reg?: [number, number, number, number] | null) => {
     if (!doc) return;
+    const target = { session: doc.session, name: doc.name };
     setAiBusy(true);
+    setAiTarget(target);
     try {
-      const r = await aiInterpret(doc.session, false, reg ?? null);
-      setAiResult(r);
+      const r = await aiInterpret(target.session, false, reg ?? null);
       setFileRefresh((n) => n + 1);
+      const stillViewing = docRef.current?.name === target.name;
+      if (!stillViewing) {
+        // 生成中に別の図面へ移動していた場合: 結果は保存済みなので通知のみ
+        showToast("ok", r.buildable
+          ? `「${target.name}」の3D生成が完了しました — ファイルを開くと表示されます`
+          : `「${target.name}」の解釈が完了しました (自動3D化は未対応の形状)`);
+        return;
+      }
+      setAiResult(r);
       if (r.buildable && r.glb) {
         setTab("3d");
         const n = r.spec.assumptions.length + r.spec.drawing_conflicts.length;
@@ -217,9 +232,10 @@ export default function App() {
         showToast("err", "解釈は完了しましたが自動3D化は未対応の形状です (右パネル参照)");
       }
     } catch (e) {
-      showToast("err", String(e));
+      showToast("err", `「${target.name}」の生成に失敗: ${e}`);
     } finally {
       setAiBusy(false);
+      setAiTarget(null);
     }
   }, [doc]);
 
@@ -279,13 +295,13 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [bulkJob?.id, bulkJob?.running]);
 
-  // 左パネル用: いま生成中のファイル名 (単発=開いている図面 / 一括=処理中の1件)
+  // 左パネル用: いま生成中のファイル名 (単発=生成開始時の図面 / 一括=処理中の1件)
   const generatingNames = useMemo(() => {
     const s = new Set<string>();
-    if (aiBusy && doc) s.add(doc.name);
+    if (aiBusy && aiTarget) s.add(aiTarget.name);
     if (bulkJob?.running && bulkJob.current) s.add(bulkJob.current);
     return s;
-  }, [aiBusy, doc, bulkJob]);
+  }, [aiBusy, aiTarget, bulkJob]);
 
   // 左パネル用: 今回の一括ジョブで処理済みのファイル → 結果ステータス
   const bulkFileStatus = useMemo(() => {
@@ -403,7 +419,13 @@ export default function App() {
               </div>
             )}
             {busy && <div className="loading-overlay"><div className="spinner" />読み込み中…</div>}
-            {aiBusy && (
+            {aiBusy && aiTarget && doc?.name !== aiTarget.name && (
+              <div className="ai-bg-chip" title="別の図面を生成中です。完了すると通知されます">
+                <span className="fi-gen">⚙</span>
+                「{aiTarget.name}」を生成中… {aiElapsed}秒
+              </div>
+            )}
+            {aiBusy && (!aiTarget || doc?.name === aiTarget.name) && (
               <div className="loading-overlay ai-working">
                 <div className="spinner" />
                 <div className="ai-working-title">
