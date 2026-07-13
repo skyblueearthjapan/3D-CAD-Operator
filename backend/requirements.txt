@@ -3,3 +3,5 @@ build123d>=0.9
 fastapi>=0.115
 uvicorn[standard]>=0.32
 python-multipart>=0.0.12
+anthropic>=0.116
+google-genai>=1.0    # 任意: Geminiクロスチェック用

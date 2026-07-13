@@ -21,7 +21,7 @@ export default function Viewer3D({ glbUrl }: Props) {
   useEffect(() => {
     const mount = mountRef.current!;
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0f1216);
+    scene.background = new THREE.Color(0xf4f7fb);
 
     const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100000);
     camera.position.set(300, 300, 300);
@@ -34,7 +34,7 @@ export default function Viewer3D({ glbUrl }: Props) {
     controls.enableDamping = true;
 
     // ライティング: CAD らしい柔らかい三点照明
-    scene.add(new THREE.HemisphereLight(0xd8e4ff, 0x2a2620, 1.1));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xdde6f0, 1.1));
     const key = new THREE.DirectionalLight(0xffffff, 1.6);
     key.position.set(1, 2, 1.5);
     scene.add(key);
@@ -42,7 +42,7 @@ export default function Viewer3D({ glbUrl }: Props) {
     rim.position.set(-2, 0.6, -1);
     scene.add(rim);
 
-    const grid = new THREE.GridHelper(1000, 50, 0x2a3340, 0x1c222b);
+    const grid = new THREE.GridHelper(1000, 50, 0xa8c0dc, 0xdbe6f2);
     scene.add(grid);
     const axes = new THREE.AxesHelper(80);
     scene.add(axes);
@@ -92,7 +92,7 @@ export default function Viewer3D({ glbUrl }: Props) {
       const st2 = stateRef.current;
       if (!st2) return;
       const material = new THREE.MeshStandardMaterial({
-        color: 0x9fb2c8, metalness: 0.55, roughness: 0.38,
+        color: 0x8fa8c4, metalness: 0.45, roughness: 0.45,
         side: THREE.DoubleSide,
       });
       const group = new THREE.Group();
@@ -104,7 +104,7 @@ export default function Viewer3D({ glbUrl }: Props) {
           group.add(m);
           const edges = new THREE.EdgesGeometry(mesh.geometry, 25);
           const line = new THREE.LineSegments(
-            edges, new THREE.LineBasicMaterial({ color: 0x39424e }));
+            edges, new THREE.LineBasicMaterial({ color: 0x33507a }));
           line.applyMatrix4(mesh.matrixWorld);
           group.add(line);
         }

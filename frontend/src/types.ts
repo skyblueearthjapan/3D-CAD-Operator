@@ -56,6 +56,98 @@ export interface ModelResult {
   glb: string;
   volume: number;
   bbox: [number, number, number];
+  valid: boolean;
 }
 
 export type ExtrudeMode = "up" | "down" | "mid";
+
+// ---------------- AI 解釈 ----------------
+
+export interface AiHole {
+  x: number;
+  y: number;
+  diameter: number | null;
+  thread: string | null;
+  csk_diameter: number | null;
+  cbore_diameter: number | null;
+  cbore_depth: number | null;
+  through: boolean;
+  depth: number | null;
+  from_face: string;
+  axis: string;
+  note: string | null;
+}
+
+export interface AiSpec {
+  part_name: string;
+  material: string | null;
+  shape_class: string;
+  thickness: number | null;
+  outer_diameter: number | null;
+  length: number | null;
+  width: number | null;
+  profile_points: number[][] | null;
+  outer_stack: { diameter: number; height: number }[] | null;
+  bore_stack: { diameter: number; height: number }[] | null;
+  holes: AiHole[];
+  chamfer_notes: string[];
+  unmodeled_features: string[];
+  unsupported_reason: string | null;
+  assumptions: string[];
+  drawing_conflicts: string[];
+}
+
+export interface AiVerification {
+  brep_valid: boolean;
+  volume_mm3: number;
+  bbox: number[];
+  dimension_warnings: string[];
+}
+
+export interface BulkRecord {
+  name: string;
+  status: string;
+  engine?: string;
+  fallback?: string;
+  part_name?: string;
+  shape_class?: string;
+  assumptions?: string[];
+  drawing_conflicts?: string[];
+  verification?: AiVerification;
+  step?: string;
+  glb?: string;
+  error?: string;
+  reason?: string;
+  cross_check_diffs?: string[];
+  seconds?: number;
+}
+
+export interface BulkJob {
+  id: string;
+  label: string;
+  total: number;
+  done: number;
+  running: boolean;
+  current: string | null;
+  out_dir: string;
+  results: BulkRecord[];
+  started_at: string;
+}
+
+export interface AiResult {
+  spec: AiSpec;
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    model: string;
+    fallback_reason?: string;
+  };
+  gemini_cross_check: unknown;
+  cross_check_diffs: string[];
+  buildable: boolean;
+  step: string | null;
+  glb: string | null;
+  verification: AiVerification | null;
+  build_error: string | null;
+  cross_check_auto: boolean;
+}

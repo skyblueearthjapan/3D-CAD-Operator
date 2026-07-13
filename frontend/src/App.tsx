@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildModel, detectContours, openFile, uploadFile } from "./api";
-import type { ExtrudeMode, LoopData, ModelResult, ParseResult } from "./types";
+import { aiInterpret, buildModel, bulkStart, bulkStatus, detectContours, openFile, uploadFile } from "./api";
+import type { AiResult, BulkJob, ExtrudeMode, LoopData, ModelResult, ParseResult } from "./types";
+import BulkPanel from "./components/BulkPanel";
 import FilePanel from "./components/FilePanel";
 import SidePanel from "./components/SidePanel";
 import Viewer2D from "./components/Viewer2D";
 import Viewer3D from "./components/Viewer3D";
 import "./App.css";
 
-type Tab = "2d" | "3d";
+type Tab = "2d" | "3d" | "bulk";
 
 export default function App() {
   const [doc, setDoc] = useState<ParseResult | null>(null);
@@ -18,6 +19,10 @@ export default function App() {
   const [thickness, setThickness] = useState(9);
   const [mode, setMode] = useState<ExtrudeMode>("up");
   const [result, setResult] = useState<ModelResult | null>(null);
+  const [aiResult, setAiResult] = useState<AiResult | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiElapsed, setAiElapsed] = useState(0);
+  const [bulkJob, setBulkJob] = useState<BulkJob | null>(null);
   const [tab, setTab] = useState<Tab>("2d");
   const [busy, setBusy] = useState(false);
   const [building, setBuilding] = useState(false);
@@ -53,6 +58,7 @@ export default function App() {
   const handleParsed = useCallback(async (r: ParseResult) => {
     setDoc(r);
     setResult(null);
+    setAiResult(null);
     setSelectedOuter(null);
     setSelectedHoles(new Set());
     setTab("2d");
@@ -162,7 +168,11 @@ export default function App() {
       const r = await buildModel(doc.session, selectedOuter, [...selectedHoles], thickness, mode);
       setResult(r);
       setTab("3d");
-      showToast("ok", "3D モデルを生成しました");
+      if (r.valid === false) {
+        showToast("err", "モデルを生成しましたが、ジオメトリ検証で警告があります。CAD での読み込みに問題があれば穴の選択を見直してください");
+      } else {
+        showToast("ok", "3D モデルを生成しました");
+      }
     } catch (e) {
       showToast("err", String(e));
     } finally {
@@ -170,8 +180,72 @@ export default function App() {
     }
   }, [doc, selectedOuter, selectedHoles, thickness, mode]);
 
+  // ---- AI 解釈 → 3D 生成 (メインフロー)
+  const onAiBuild = useCallback(async () => {
+    if (!doc) return;
+    setAiBusy(true);
+    try {
+      const r = await aiInterpret(doc.session, false);
+      setAiResult(r);
+      if (r.buildable && r.glb) {
+        setTab("3d");
+        const n = r.spec.assumptions.length + r.spec.drawing_conflicts.length;
+        showToast("ok", n > 0
+          ? `3Dモデルを生成しました。仮定・矛盾が ${n} 件あります — 右パネルで確認してください`
+          : "3Dモデルを生成しました");
+      } else {
+        showToast("err", "解釈は完了しましたが自動3D化は未対応の形状です (右パネル参照)");
+      }
+    } catch (e) {
+      showToast("err", String(e));
+    } finally {
+      setAiBusy(false);
+    }
+  }, [doc]);
+
+  // ---- 一括3D化
+  const onBulkStart = useCallback(async (path: string, label: string) => {
+    try {
+      const r = await bulkStart(path);
+      setBulkJob({
+        id: r.job_id, label, total: r.total, done: 0, running: true,
+        current: null, out_dir: r.out_dir, results: [], started_at: "",
+      });
+      setTab("bulk");
+      showToast("ok", `一括3D化を開始しました (${r.total} 件)。処理中も他の作業ができます`);
+    } catch (e) {
+      showToast("err", String(e));
+    }
+  }, []);
+
+  // AI解釈中の経過秒カウント (フリーズしていないことを可視化)
+  useEffect(() => {
+    if (!aiBusy) { setAiElapsed(0); return; }
+    const t = window.setInterval(() => setAiElapsed((s) => s + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [aiBusy]);
+
+  // 一括ジョブのポーリング (実行中のみ 4 秒ごと)
+  useEffect(() => {
+    if (!bulkJob?.running) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const j = await bulkStatus(bulkJob.id);
+        setBulkJob(j);
+        if (!j.running) {
+          const built = j.results.filter((r) => r.status === "built").length;
+          showToast("ok", `一括3D化が完了しました: ${built}/${j.total} 件を3D化`);
+        }
+      } catch {
+        /* サーバー再起動等は次のポーリングで回復 */
+      }
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [bulkJob?.id, bulkJob?.running]);
+
   // ステップ進行状況
-  const step = !doc ? 1 : selectedOuter === null ? 2 : !result ? 3 : 4;
+  const built = !!(aiResult?.buildable || result);
+  const step = !doc ? 1 : !built ? 2 : 3;
 
   useEffect(() => {
     document.title = doc ? `${doc.name} — DXF→STEP` : "DXF → STEP 変換システム";
@@ -194,7 +268,7 @@ export default function App() {
           DXF <span className="arrow">→</span> STEP <span className="brand-sub">変換システム</span>
         </div>
         <div className="steps">
-          {["DXFを開く", "外形を選択", "板厚を設定", "STEP出力"].map((s, i) => (
+          {["DXFを開く", "生成 (AI解釈)", "確認・STEP出力"].map((s, i) => (
             <div key={s} className={`step ${step > i + 1 ? "done" : step === i + 1 ? "now" : ""}`}>
               <span className="step-n">{step > i + 1 ? "✓" : i + 1}</span>{s}
             </div>
@@ -209,6 +283,8 @@ export default function App() {
           onUpload={onUpload}
           currentName={doc?.name ?? null}
           busy={busy}
+          onBulkStart={onBulkStart}
+          bulkRunning={!!bulkJob?.running}
         />
 
         <main className="center">
@@ -219,14 +295,41 @@ export default function App() {
             <button
               className={tab === "3d" ? "tab active" : "tab"}
               onClick={() => setTab("3d")}
-              disabled={!result}
+              disabled={!aiResult?.glb && !result}
             >
               モデル (3D)
             </button>
+            {bulkJob && (
+              <button
+                className={tab === "bulk" ? "tab active" : "tab"}
+                onClick={() => setTab("bulk")}
+              >
+                一括3D化 {bulkJob.running ? `(${bulkJob.done}/${bulkJob.total})` : "✓"}
+              </button>
+            )}
           </div>
           <div className="view-area">
             {busy && <div className="loading-overlay"><div className="spinner" />読み込み中…</div>}
-            {tab === "2d" ? (
+            {aiBusy && (
+              <div className="loading-overlay ai-working">
+                <div className="spinner" />
+                <div className="ai-working-title">
+                  AIが図面を解釈しています… <b>{aiElapsed}秒経過</b>
+                </div>
+                <div className="ai-working-steps">
+                  <span className={aiElapsed < 5 ? "on" : "done"}>① 図面をAI用データに変換</span>
+                  <span className={aiElapsed >= 5 && aiElapsed < 60 ? "on" : aiElapsed >= 60 ? "done" : ""}>② 注記・寸法・多面図を読解中</span>
+                  <span className={aiElapsed >= 60 ? "on" : ""}>③ 3Dソリッド生成・検証</span>
+                </div>
+                <div className="hint">
+                  目安 30〜120秒。時間がかかる場合は図面が複雑なだけで、フリーズではありません。<br />
+                  何枚もまとめて変換する場合は、左の「📦 一括3D化」なら待たずに他の作業ができます。
+                </div>
+              </div>
+            )}
+            {tab === "bulk" && bulkJob ? (
+              <BulkPanel job={bulkJob} />
+            ) : tab === "2d" ? (
               doc ? (
                 <Viewer2D
                   display={doc.display}
@@ -250,7 +353,7 @@ export default function App() {
                 </div>
               )
             ) : (
-              <Viewer3D glbUrl={result?.glb ?? null} />
+              <Viewer3D glbUrl={aiResult?.glb ?? result?.glb ?? null} />
             )}
           </div>
         </main>
@@ -271,6 +374,9 @@ export default function App() {
           building={building}
           result={result}
           hasDoc={!!doc}
+          onAiBuild={onAiBuild}
+          aiBusy={aiBusy}
+          aiResult={aiResult}
         />
       </div>
 

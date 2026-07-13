@@ -1,4 +1,4 @@
-import type { BrowseResult, LoopData, ModelResult, ParseResult, ExtrudeMode } from "./types";
+import type { AiResult, BrowseResult, BulkJob, LoopData, ModelResult, ParseResult, ExtrudeMode } from "./types";
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -43,6 +43,29 @@ export async function detectContours(session: string, layers: string[]): Promise
   });
   const data = await jsonOrThrow<{ loops: LoopData[] }>(res);
   return data.loops;
+}
+
+export async function aiInterpret(session: string, crossCheck: boolean): Promise<AiResult> {
+  const res = await fetch("/api/ai_interpret", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session, cross_check: crossCheck }),
+  });
+  return jsonOrThrow(res);
+}
+
+export async function bulkStart(path: string): Promise<{ job_id: string; total: number; out_dir: string }> {
+  const res = await fetch("/api/bulk_start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, recursive: true }),
+  });
+  return jsonOrThrow(res);
+}
+
+export async function bulkStatus(jobId: string): Promise<BulkJob> {
+  const res = await fetch(`/api/bulk/${jobId}`);
+  return jsonOrThrow(res);
 }
 
 export async function buildModel(

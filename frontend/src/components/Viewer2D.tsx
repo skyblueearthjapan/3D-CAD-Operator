@@ -118,7 +118,7 @@ export default function Viewer2D({
               key={i}
               points={d.pts.map(([x, y]) => `${x},${y}`).join(" ")}
               fill="none"
-              stroke={d.color === "#ffffff" ? "#aeb7c2" : d.color}
+              stroke={d.color === "#ffffff" ? "#4a5c72" : d.color}
               strokeWidth={0.8}
               vectorEffect="non-scaling-stroke"
               opacity={0.85}
@@ -131,7 +131,7 @@ export default function Viewer2D({
               x={d.x}
               y={-d.y}
               fontSize={d.h}
-              fill={d.color === "#ffffff" ? "#8b95a3" : d.color}
+              fill={d.color === "#ffffff" ? "#6b7a8d" : d.color}
               opacity={0.75}
               transform={`scale(1,-1) ${d.rot ? `rotate(${-d.rot} ${d.x} ${-d.y})` : ""}`}
               style={{ userSelect: "none" }}
@@ -146,8 +146,8 @@ export default function Viewer2D({
             const isHover = l.id === hovered;
             let fill = "transparent";
             let stroke = "transparent";
-            if (isOuter) { fill = "rgba(76,194,255,0.16)"; stroke = "#4cc2ff"; }
-            else if (hs === "on") { fill = "rgba(255,110,90,0.28)"; stroke = "#ff6e5a"; }
+            if (isOuter) { fill = "rgba(47,111,191,0.14)"; stroke = "#2f6fbf"; }
+            else if (hs === "on") { fill = "rgba(192,90,78,0.22)"; stroke = "#c05a4e"; }
             else if (hs === "off") { fill = "rgba(255,255,255,0.03)"; stroke = "rgba(255,180,84,0.5)"; }
             if (isHover && !isOuter) fill = hs === "on" ? "rgba(255,110,90,0.4)" : "rgba(76,194,255,0.12)";
             return (

@@ -164,6 +164,79 @@ def model(req: ModelReq):
     }
 
 
+# ------------------------------------------------------------------ AI 解釈
+
+class AiInterpretReq(BaseModel):
+    session: str
+    cross_check: bool = False   # Gemini第二意見 (GEMINI_API_KEY 設定時のみ有効)
+
+
+@app.post("/api/ai_interpret")
+def ai_interpret(req: AiInterpretReq):
+    """AI図面解釈 (Claude優先・Geminiフォールバック) → 形状仕様JSON → (対応形状なら) 自動3D化。"""
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("GEMINI_API_KEY")):
+        raise HTTPException(503, "ANTHROPIC_API_KEY / GEMINI_API_KEY のいずれも設定されていません")
+    s = _get_session(req.session)
+    from .ai_interpreter import run_interpret
+    try:
+        base = Path(s["name"]).stem or "model"
+        return run_interpret(s["doc"], s["dir"], base, req.session,
+                             cross_check=req.cross_check)
+    except Exception as e:
+        raise HTTPException(500, f"AI解釈エラー: {e}")
+
+
+# ------------------------------------------------------------------ 一括3D化
+
+BULK_ROOT = DXF_ROOT.parent / "一括3D化"
+
+
+class BulkStartReq(BaseModel):
+    path: str = ""          # DXF_ROOT からの相対フォルダ
+    recursive: bool = True
+
+
+@app.post("/api/bulk_start")
+def bulk_start(req: BulkStartReq):
+    """フォルダ内DXFの一括3D化をバックグラウンドで開始し、ジョブIDを即返す。"""
+    if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("GEMINI_API_KEY")):
+        raise HTTPException(503, "APIキーが設定されていません")
+    from .bulk import MAX_FILES, start_job
+    base = (DXF_ROOT / req.path).resolve()
+    if not str(base).startswith(str(DXF_ROOT.resolve())) or not base.exists():
+        raise HTTPException(404, "フォルダが見つかりません")
+    files = sorted(base.rglob("*.dxf") if req.recursive else base.glob("*.dxf"))
+    if not files:
+        raise HTTPException(400, "対象フォルダに DXF がありません")
+    if len(files) > MAX_FILES:
+        raise HTTPException(400, f"対象が多すぎます ({len(files)}件 > 上限{MAX_FILES}件)")
+    label = req.path or "部品表フォルダ全体"
+    job = start_job(files, BULK_ROOT, label)
+    return {"job_id": job["id"], "total": job["total"], "out_dir": job["out_dir"]}
+
+
+@app.get("/api/bulk/{job_id}")
+def bulk_status(job_id: str):
+    from .bulk import get_job
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(404, "ジョブが見つかりません")
+    return job
+
+
+@app.get("/api/bulk/{job_id}/file/{name}")
+def bulk_file(job_id: str, name: str):
+    from .bulk import get_job
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(404, "ジョブが見つかりません")
+    p = (Path(job["out_dir"]) / name).resolve()
+    if not str(p).startswith(str(Path(job["out_dir"]).resolve())) or not p.exists():
+        raise HTTPException(404, "ファイルが見つかりません")
+    media = "model/gltf-binary" if p.suffix == ".glb" else "application/step"
+    return FileResponse(str(p), media_type=media, filename=name)
+
+
 @app.get("/api/file/{sid}/{name}")
 def get_file(sid: str, name: str):
     s = _get_session(sid)

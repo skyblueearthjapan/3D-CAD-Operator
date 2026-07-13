@@ -7,10 +7,12 @@ interface Props {
   onUpload: (file: File) => void;
   currentName: string | null;
   busy: boolean;
+  onBulkStart: (path: string, label: string) => void;
+  bulkRunning: boolean;
 }
 
-/** 左パネル: サーバフォルダブラウズ + ドラッグ&ドロップ */
-export default function FilePanel({ onOpenPath, onUpload, currentName, busy }: Props) {
+/** 左パネル: サーバフォルダブラウズ + ドラッグ&ドロップ + 一括3D化 */
+export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onBulkStart, bulkRunning }: Props) {
   const [path, setPath] = useState("");
   const [data, setData] = useState<BrowseResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -69,6 +71,15 @@ export default function FilePanel({ onOpenPath, onUpload, currentName, busy }: P
         </span>
         <button className="btn-ghost" onClick={() => load(path)} title="再読込">⟳</button>
       </div>
+
+      <button
+        className="btn-secondary"
+        disabled={bulkRunning || !data?.exists}
+        onClick={() => onBulkStart(path, path || "部品表フォルダ全体")}
+        title="このフォルダ内 (サブフォルダ含む) の全DXFをバックグラウンドで順次3D化します"
+      >
+        {bulkRunning ? "一括3D化 実行中…" : "📦 このフォルダを一括3D化"}
+      </button>
 
       {error && <div className="error-box">{error}</div>}
       {data && !data.exists && (

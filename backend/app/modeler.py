@@ -10,9 +10,12 @@ from __future__ import annotations
 import math
 
 from build123d import (
-    Edge, Wire, Face, Plane, Vector,
+    Edge, Wire, Face, Plane, Pos, Solid, Vector,
     extrude, export_step, export_gltf,
 )
+from OCP.BRepCheck import BRepCheck_Analyzer
+from OCP.ShapeFix import ShapeFix_Shape
+from OCP.TopAbs import TopAbs_ShapeEnum
 
 from .contours import Loop
 from .dxf_parser import Segment
@@ -69,30 +72,72 @@ def build_solid(outer: Loop, holes: list[Loop], thickness: float,
     """押し出しソリッドを生成する。
 
     mode: 'up' (+Z), 'down' (-Z), 'mid' (両側均等)
+
+    穴は面の内周ワイヤではなくブーリアン減算で開ける。図面上で穴領域が
+    分割・接触・重複していても正しいソリッドになり、SOLIDWORKS 等での
+    サーフェス化 (knit 失敗) を防ぐ。
     """
     if thickness <= 0:
         raise ModelError("板厚は正の値を指定してください")
-    outer_wire = wire_from_loop(outer)
-    hole_wires = []
-    for h in holes:
-        try:
-            hole_wires.append(wire_from_loop(h))
-        except ModelError:
-            continue  # 不正な穴はスキップ
     try:
-        face = Face(outer_wire, hole_wires)
+        face = Face(wire_from_loop(outer))
     except Exception as e:
-        raise ModelError(f"面の生成に失敗しました: {e}")
+        raise ModelError(f"外形面の生成に失敗しました: {e}")
     if face.area <= 0:
-        raise ModelError("面の面積が 0 です")
+        raise ModelError("外形面の面積が 0 です")
 
     if mode == "mid":
+        z0, z1 = -thickness / 2, thickness / 2
         solid = extrude(face, amount=thickness / 2, both=True)
     elif mode == "down":
+        z0, z1 = -thickness, 0.0
         solid = extrude(face, amount=-thickness)
     else:
+        z0, z1 = 0.0, thickness
         solid = extrude(face, amount=thickness)
+
+    # 穴カッター: 板厚より上下 1mm ずつ長く押し出して確実に貫通させる
+    cutters = []
+    for h in holes:
+        try:
+            hf = Face(wire_from_loop(h))
+            if hf.area <= 0:
+                continue
+            cutters.append(extrude(Pos(0, 0, z0 - 1.0) * hf, amount=(z1 - z0) + 2.0))
+        except (ModelError, Exception):
+            continue  # 不正な穴はスキップ
+    if cutters:
+        try:
+            cutter = cutters[0] if len(cutters) == 1 else cutters[0].fuse(*cutters[1:])
+            solid = solid.cut(cutter)
+        except Exception as e:
+            raise ModelError(f"穴のブーリアン減算に失敗しました: {e}")
+
+    return _heal(solid)
+
+
+def _heal(solid):
+    """ジオメトリ検証。不正なら ShapeFix で修復を試みる。"""
+    try:
+        if BRepCheck_Analyzer(solid.wrapped).IsValid():
+            return solid
+        fixer = ShapeFix_Shape(solid.wrapped)
+        fixer.Perform()
+        fixed = fixer.Shape()
+        if fixed.ShapeType() == TopAbs_ShapeEnum.TopAbs_SOLID:
+            healed = Solid(fixed)
+            if healed.volume > 0:
+                return healed
+    except Exception:
+        pass
     return solid
+
+
+def is_valid(solid) -> bool:
+    try:
+        return bool(BRepCheck_Analyzer(solid.wrapped).IsValid())
+    except Exception:
+        return True
 
 
 def export_outputs(solid, step_path: str, glb_path: str) -> dict:
@@ -102,4 +147,5 @@ def export_outputs(solid, step_path: str, glb_path: str) -> dict:
     return {
         "volume": round(solid.volume, 2),          # mm^3
         "bbox": [round(bb.size.X, 2), round(bb.size.Y, 2), round(bb.size.Z, 2)],
+        "valid": is_valid(solid),
     }
