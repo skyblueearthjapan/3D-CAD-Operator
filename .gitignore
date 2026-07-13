@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# 作業ファイル
+backend/.sessions/
+*.log
+.omc/
+
+# OS
+Thumbs.db
+.DS_Store
