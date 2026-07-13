@@ -45,6 +45,13 @@ export async function detectContours(session: string, layers: string[]): Promise
   return data.loops;
 }
 
+export async function getCachedResult(
+  path: string,
+): Promise<{ exists: boolean; result?: AiResult }> {
+  const res = await fetch(`/api/cached_result?path=${encodeURIComponent(path)}`);
+  return jsonOrThrow(res);
+}
+
 export async function aiInterpret(session: string, crossCheck: boolean): Promise<AiResult> {
   const res = await fetch("/api/ai_interpret", {
     method: "POST",

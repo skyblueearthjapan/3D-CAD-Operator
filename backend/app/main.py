@@ -6,10 +6,13 @@
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import tempfile
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile
@@ -82,12 +85,14 @@ class OpenReq(BaseModel):
     path: str
 
 
-def _parse_and_respond(filepath: str, display_name: str) -> dict:
+def _parse_and_respond(filepath: str, display_name: str,
+                       relpath: str | None = None) -> dict:
     try:
         doc = DxfDocument(filepath)
     except Exception as e:
         raise HTTPException(422, f"DXF の解析に失敗しました: {e}")
     sid = _new_session(display_name, doc)
+    SESSIONS[sid]["relpath"] = relpath
     data = doc.to_json()
     return {"session": sid, "name": display_name, **data}
 
@@ -98,7 +103,7 @@ def open_from_root(req: OpenReq):
     p = (DXF_ROOT / req.path).resolve()
     if not str(p).startswith(str(DXF_ROOT.resolve())) or not p.exists():
         raise HTTPException(404, "ファイルが見つかりません")
-    return _parse_and_respond(str(p), p.name)
+    return _parse_and_respond(str(p), p.name, relpath=req.path)
 
 
 @app.post("/api/upload")
@@ -171,6 +176,51 @@ class AiInterpretReq(BaseModel):
     cross_check: bool = False   # Gemini第二意見 (GEMINI_API_KEY 設定時のみ有効)
 
 
+# 生成結果の永続保存: DXFごとに最後の生成結果を保持し、開き直したとき復元する
+CACHE_ROOT = DXF_ROOT.parent / "生成済み3D"
+
+
+def _cache_slug(relpath: str) -> str:
+    return re.sub(r"[\\/:*?\"<>| ]", "_", relpath)[:120]
+
+
+def _save_to_cache(relpath: str, result: dict, session_dir: Path, base: str):
+    cdir = CACHE_ROOT / _cache_slug(relpath)
+    cdir.mkdir(parents=True, exist_ok=True)
+    cached = dict(result)
+    cached["cached_at"] = datetime.now().isoformat(timespec="seconds")
+    cached["source_path"] = relpath
+    slug = _cache_slug(relpath)
+    for key, suffix in (("step", ".step"), ("glb", ".glb")):
+        src = session_dir / f"{base}_AI{suffix}"
+        if result.get(key) and src.exists():
+            shutil.copy2(src, cdir / src.name)
+            cached[key] = f"/api/cached/{slug}/{src.name}"
+    (cdir / "result.json").write_text(
+        json.dumps(cached, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+@app.get("/api/cached_result")
+def cached_result(path: str):
+    """保存済みの生成結果 (あれば)。フロントは図面を開いたときにこれで3Dを復元する。"""
+    f = CACHE_ROOT / _cache_slug(path) / "result.json"
+    if not f.exists():
+        return {"exists": False}
+    try:
+        return {"exists": True, "result": json.loads(f.read_text(encoding="utf-8"))}
+    except Exception:
+        return {"exists": False}
+
+
+@app.get("/api/cached/{slug}/{name}")
+def cached_file(slug: str, name: str):
+    p = (CACHE_ROOT / slug / name).resolve()
+    if not str(p).startswith(str(CACHE_ROOT.resolve())) or not p.exists():
+        raise HTTPException(404, "ファイルが見つかりません")
+    media = "model/gltf-binary" if p.suffix == ".glb" else "application/step"
+    return FileResponse(str(p), media_type=media, filename=name)
+
+
 @app.post("/api/ai_interpret")
 def ai_interpret(req: AiInterpretReq):
     """AI図面解釈 (Claude優先・Geminiフォールバック) → 形状仕様JSON → (対応形状なら) 自動3D化。"""
@@ -180,10 +230,16 @@ def ai_interpret(req: AiInterpretReq):
     from .ai_interpreter import run_interpret
     try:
         base = Path(s["name"]).stem or "model"
-        return run_interpret(s["doc"], s["dir"], base, req.session,
-                             cross_check=req.cross_check)
+        result = run_interpret(s["doc"], s["dir"], base, req.session,
+                               cross_check=req.cross_check)
     except Exception as e:
         raise HTTPException(500, f"AI解釈エラー: {e}")
+    if s.get("relpath"):
+        try:  # 保存失敗は本処理を止めない
+            _save_to_cache(s["relpath"], result, s["dir"], base)
+        except Exception:
+            pass
+    return result
 
 
 # ------------------------------------------------------------------ 一括3D化

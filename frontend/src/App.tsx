@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { aiInterpret, buildModel, bulkStart, bulkStatus, detectContours, openFile, uploadFile } from "./api";
+import { aiInterpret, buildModel, bulkStart, bulkStatus, detectContours, getCachedResult, openFile, uploadFile } from "./api";
 import type { AiResult, BulkJob, ExtrudeMode, LoopData, ModelResult, ParseResult } from "./types";
 import BulkPanel from "./components/BulkPanel";
 import FilePanel from "./components/FilePanel";
@@ -94,7 +94,21 @@ export default function App() {
   const onOpenPath = useCallback(async (path: string) => {
     setBusy(true);
     try {
-      handleParsed(await openFile(path));
+      const parsed = await openFile(path);
+      await handleParsed(parsed);
+      // 保存済みの生成結果 (前回の3Dモデル) があれば復元する
+      try {
+        const c = await getCachedResult(path);
+        if (c.exists && c.result) {
+          setAiResult(c.result);
+          if (c.result.glb) {
+            showToast("ok",
+              `前回の生成結果を復元しました (${c.result.cached_at?.replace("T", " ") ?? "日時不明"} 生成)。再生成も可能です`);
+          }
+        }
+      } catch {
+        /* 復元失敗は無視 (通常フローに影響させない) */
+      }
     } catch (e) {
       showToast("err", String(e));
     } finally {

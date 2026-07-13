@@ -150,4 +150,7 @@ export interface AiResult {
   verification: AiVerification | null;
   build_error: string | null;
   cross_check_auto: boolean;
+  auto_fix?: string | null;
+  cached_at?: string;      // 保存済み結果を復元した場合の生成日時
+  source_path?: string;
 }
