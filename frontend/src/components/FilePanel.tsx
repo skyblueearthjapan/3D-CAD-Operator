@@ -10,10 +10,22 @@ interface Props {
   onBulkStart: (path: string, label: string) => void;
   onBulkStartFiles: (files: string[]) => void;
   bulkRunning: boolean;
+  generatingNames: Set<string>;                 // いま生成中のファイル名
+  bulkFileStatus: Record<string, string>;       // 今回の一括ジョブの処理結果 (name→status)
 }
 
+const BULK_MARK: Record<string, { icon: string; cls: string; label: string }> = {
+  built: { icon: "✓", cls: "ok", label: "3D化成功" },
+  built_invalid: { icon: "⚠", cls: "warn", label: "生成したが検証警告あり" },
+  interpreted_only: { icon: "－", cls: "dim", label: "解釈のみ (自動3D化は未対応の形状)" },
+  not_a_part: { icon: "－", cls: "dim", label: "対象外 (組立図・購入品等)" },
+  build_failed: { icon: "✗", cls: "err", label: "ビルド失敗" },
+  error: { icon: "✗", cls: "err", label: "エラー" },
+  skipped_large: { icon: "－", cls: "dim", label: "スキップ (ファイルが大きすぎる)" },
+};
+
 /** 左パネル: サーバフォルダブラウズ + ドラッグ&ドロップ + 一括3D化 (フォルダ/選択ファイル) */
-export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onBulkStart, onBulkStartFiles, bulkRunning }: Props) {
+export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onBulkStart, onBulkStartFiles, bulkRunning, generatingNames, bulkFileStatus }: Props) {
   const [path, setPath] = useState("");
   const [data, setData] = useState<BrowseResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -165,28 +177,38 @@ export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onB
             このフォルダの {data.files.length} 件を選択
           </label>
         )}
-        {data?.files.map((f) => (
-          <div key={f.path} className="file-row">
-            <input
-              type="checkbox"
-              className="fi-check"
-              checked={checked.has(f.path)}
-              onChange={() => toggleCheck(f.path)}
-              disabled={bulkRunning}
-              title="一括3D化の対象にする"
-            />
-            <button
-              className={`file-item ${currentName === f.name ? "active" : ""}`}
-              disabled={busy}
-              onClick={() => onOpenPath(f.path)}
-              title={f.name}
-            >
-              <span className="fi-icon">📐</span>
-              <span className="fi-name">{f.name}</span>
-              <span className="fi-size">{fmtSize(f.size)}</span>
-            </button>
-          </div>
-        ))}
+        {data?.files.map((f) => {
+          const generating = generatingNames.has(f.name);
+          const mark = !generating ? BULK_MARK[bulkFileStatus[f.name] ?? ""] : undefined;
+          return (
+            <div key={f.path} className="file-row">
+              <input
+                type="checkbox"
+                className="fi-check"
+                checked={checked.has(f.path)}
+                onChange={() => toggleCheck(f.path)}
+                disabled={bulkRunning}
+                title="一括3D化の対象にする"
+              />
+              <button
+                className={`file-item ${currentName === f.name ? "active" : ""} ${generating ? "generating" : ""}`}
+                disabled={busy}
+                onClick={() => onOpenPath(f.path)}
+                title={generating ? `${f.name} — AI生成中…` : mark ? `${f.name} — ${mark.label}` : f.name}
+              >
+                <span className="fi-icon">📐</span>
+                <span className="fi-name">{f.name}</span>
+                {generating ? (
+                  <span className="fi-gen" title="AI生成中">⚙</span>
+                ) : mark ? (
+                  <span className={`fi-mark ${mark.cls}`}>{mark.icon}</span>
+                ) : (
+                  <span className="fi-size">{fmtSize(f.size)}</span>
+                )}
+              </button>
+            </div>
+          );
+        })}
         {data && data.dirs.length === 0 && data.files.length === 0 && data.exists && (
           <div className="hint" style={{ padding: 12 }}>DXF ファイルがありません</div>
         )}

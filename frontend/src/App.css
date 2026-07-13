@@ -165,6 +165,33 @@ body {
 
 /* ファイル行 = チェックボックス + 開くボタン */
 .file-row { display: flex; align-items: center; gap: 2px; }
+
+/* 生成中の強調 (枠+回転ギア)。box-shadowでレイアウトを崩さない */
+.file-item.generating {
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  border-radius: 6px;
+  background: var(--accent-dim);
+  animation: gen-pulse 1.6s ease-in-out infinite;
+}
+@keyframes gen-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 1.5px var(--accent); }
+  50% { box-shadow: inset 0 0 0 1.5px rgba(47, 111, 191, 0.35); }
+}
+.fi-gen {
+  flex-shrink: 0;
+  display: inline-block;
+  animation: gen-spin 1.4s linear infinite;
+  color: var(--accent-strong);
+  font-size: 13px;
+}
+@keyframes gen-spin { to { transform: rotate(360deg); } }
+
+/* 一括ジョブの処理結果マーク */
+.fi-mark { flex-shrink: 0; font-size: 12px; font-weight: 700; }
+.fi-mark.ok { color: #2e9e5b; }
+.fi-mark.warn { color: #d99114; }
+.fi-mark.err { color: #c05a4e; }
+.fi-mark.dim { color: var(--text-dim); font-weight: 400; }
 .file-row .file-item { flex: 1; min-width: 0; }
 .fi-check {
   flex-shrink: 0;

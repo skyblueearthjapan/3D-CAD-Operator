@@ -276,6 +276,21 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [bulkJob?.id, bulkJob?.running]);
 
+  // 左パネル用: いま生成中のファイル名 (単発=開いている図面 / 一括=処理中の1件)
+  const generatingNames = useMemo(() => {
+    const s = new Set<string>();
+    if (aiBusy && doc) s.add(doc.name);
+    if (bulkJob?.running && bulkJob.current) s.add(bulkJob.current);
+    return s;
+  }, [aiBusy, doc, bulkJob]);
+
+  // 左パネル用: 今回の一括ジョブで処理済みのファイル → 結果ステータス
+  const bulkFileStatus = useMemo(() => {
+    const m: Record<string, string> = {};
+    bulkJob?.results.forEach((r) => { m[r.name] = r.status; });
+    return m;
+  }, [bulkJob]);
+
   // ステップ進行状況
   const built = !!(aiResult?.buildable || result);
   const step = !doc ? 1 : !built ? 2 : 3;
@@ -319,6 +334,8 @@ export default function App() {
           onBulkStart={onBulkStart}
           onBulkStartFiles={onBulkStartFiles}
           bulkRunning={!!bulkJob?.running}
+          generatingNames={generatingNames}
+          bulkFileStatus={bulkFileStatus}
         />
 
         <main className="center">
