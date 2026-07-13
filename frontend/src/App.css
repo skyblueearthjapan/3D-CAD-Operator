@@ -163,6 +163,33 @@ body {
 .fi-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fi-size { color: var(--text-dim); font-size: 10.5px; flex-shrink: 0; }
 
+/* ファイル行 = チェックボックス + 開くボタン */
+.file-row { display: flex; align-items: center; gap: 2px; }
+.file-row .file-item { flex: 1; min-width: 0; }
+.fi-check {
+  flex-shrink: 0;
+  margin-left: 6px;
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.file-select-all {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px 5px 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid var(--panel2);
+}
+.file-select-all input { accent-color: var(--accent); cursor: pointer; }
+.bulk-select-box { display: flex; flex-direction: column; gap: 4px; }
+.bulk-select-box .bulk-selected { border-width: 2px; font-weight: 600; }
+.clear-check { font-size: 11px; color: var(--text-dim); align-self: center; }
+
 /* ---------------- 中央 ---------------- */
 .center { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 

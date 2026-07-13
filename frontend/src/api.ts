@@ -61,11 +61,14 @@ export async function aiInterpret(session: string, crossCheck: boolean): Promise
   return jsonOrThrow(res);
 }
 
-export async function bulkStart(path: string): Promise<{ job_id: string; total: number; out_dir: string }> {
+export async function bulkStart(
+  path: string,
+  files?: string[],
+): Promise<{ job_id: string; total: number; out_dir: string }> {
   const res = await fetch("/api/bulk_start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path, recursive: true }),
+    body: JSON.stringify(files && files.length ? { files } : { path, recursive: true }),
   });
   return jsonOrThrow(res);
 }

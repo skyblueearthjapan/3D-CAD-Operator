@@ -8,15 +8,40 @@ interface Props {
   currentName: string | null;
   busy: boolean;
   onBulkStart: (path: string, label: string) => void;
+  onBulkStartFiles: (files: string[]) => void;
   bulkRunning: boolean;
 }
 
-/** 左パネル: サーバフォルダブラウズ + ドラッグ&ドロップ + 一括3D化 */
-export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onBulkStart, bulkRunning }: Props) {
+/** 左パネル: サーバフォルダブラウズ + ドラッグ&ドロップ + 一括3D化 (フォルダ/選択ファイル) */
+export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onBulkStart, onBulkStartFiles, bulkRunning }: Props) {
   const [path, setPath] = useState("");
   const [data, setData] = useState<BrowseResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // チェックした DXF (相対パス)。フォルダを移動しても選択は保持される
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+
+  const toggleCheck = (p: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p); else next.add(p);
+      return next;
+    });
+  };
+
+  const allInFolderChecked =
+    !!data?.files.length && data.files.every((f) => checked.has(f.path));
+  const toggleFolderAll = () => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (allInFolderChecked) {
+        data?.files.forEach((f) => next.delete(f.path));
+      } else {
+        data?.files.forEach((f) => next.add(f.path));
+      }
+      return next;
+    });
+  };
 
   const load = useCallback(async (p: string) => {
     try {
@@ -72,14 +97,30 @@ export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onB
         <button className="btn-ghost" onClick={() => load(path)} title="再読込">⟳</button>
       </div>
 
-      <button
-        className="btn-secondary"
-        disabled={bulkRunning || !data?.exists}
-        onClick={() => onBulkStart(path, path || "部品表フォルダ全体")}
-        title="このフォルダ内 (サブフォルダ含む) の全DXFをバックグラウンドで順次3D化します"
-      >
-        {bulkRunning ? "一括3D化 実行中…" : "📦 このフォルダを一括3D化"}
-      </button>
+      {checked.size > 0 ? (
+        <div className="bulk-select-box">
+          <button
+            className="btn-secondary bulk-selected"
+            disabled={bulkRunning}
+            onClick={() => onBulkStartFiles([...checked])}
+            title="チェックしたDXFだけをバックグラウンドで順次3D化します"
+          >
+            {bulkRunning ? "一括3D化 実行中…" : `✅ 選択した ${checked.size} 件を一括3D化`}
+          </button>
+          <button className="btn-ghost clear-check" onClick={() => setChecked(new Set())}>
+            選択解除
+          </button>
+        </div>
+      ) : (
+        <button
+          className="btn-secondary"
+          disabled={bulkRunning || !data?.exists}
+          onClick={() => onBulkStart(path, path || "部品表フォルダ全体")}
+          title="このフォルダ内 (サブフォルダ含む) の全DXFを順次3D化します。特定のファイルだけ処理したい場合は、ファイル名の左のチェックを使ってください"
+        >
+          {bulkRunning ? "一括3D化 実行中…" : "📦 このフォルダを一括3D化"}
+        </button>
+      )}
 
       {error && <div className="error-box">{error}</div>}
       {data && !data.exists && (
@@ -93,18 +134,33 @@ export default function FilePanel({ onOpenPath, onUpload, currentName, busy, onB
             <span className="fi-name">{d.name}</span>
           </button>
         ))}
+        {!!data?.files.length && (
+          <label className="file-select-all">
+            <input type="checkbox" checked={allInFolderChecked} onChange={toggleFolderAll} />
+            このフォルダの {data.files.length} 件を選択
+          </label>
+        )}
         {data?.files.map((f) => (
-          <button
-            key={f.path}
-            className={`file-item ${currentName === f.name ? "active" : ""}`}
-            disabled={busy}
-            onClick={() => onOpenPath(f.path)}
-            title={f.name}
-          >
-            <span className="fi-icon">📐</span>
-            <span className="fi-name">{f.name}</span>
-            <span className="fi-size">{fmtSize(f.size)}</span>
-          </button>
+          <div key={f.path} className="file-row">
+            <input
+              type="checkbox"
+              className="fi-check"
+              checked={checked.has(f.path)}
+              onChange={() => toggleCheck(f.path)}
+              disabled={bulkRunning}
+              title="一括3D化の対象にする"
+            />
+            <button
+              className={`file-item ${currentName === f.name ? "active" : ""}`}
+              disabled={busy}
+              onClick={() => onOpenPath(f.path)}
+              title={f.name}
+            >
+              <span className="fi-icon">📐</span>
+              <span className="fi-name">{f.name}</span>
+              <span className="fi-size">{fmtSize(f.size)}</span>
+            </button>
+          </div>
         ))}
         {data && data.dirs.length === 0 && data.files.length === 0 && data.exists && (
           <div className="hint" style={{ padding: 12 }}>DXF ファイルがありません</div>

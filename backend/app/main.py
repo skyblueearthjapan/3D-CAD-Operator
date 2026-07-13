@@ -250,23 +250,38 @@ BULK_ROOT = DXF_ROOT.parent / "一括3D化"
 class BulkStartReq(BaseModel):
     path: str = ""          # DXF_ROOT からの相対フォルダ
     recursive: bool = True
+    files: list[str] | None = None  # 指定時: このファイルリスト(相対パス)のみ処理
 
 
 @app.post("/api/bulk_start")
 def bulk_start(req: BulkStartReq):
-    """フォルダ内DXFの一括3D化をバックグラウンドで開始し、ジョブIDを即返す。"""
+    """一括3D化をバックグラウンドで開始し、ジョブIDを即返す。
+
+    files指定時はチェックされたファイルのみ、未指定時はフォルダ内全DXFを対象にする。
+    """
     if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("GEMINI_API_KEY")):
         raise HTTPException(503, "APIキーが設定されていません")
     from .bulk import MAX_FILES, start_job
-    base = (DXF_ROOT / req.path).resolve()
-    if not str(base).startswith(str(DXF_ROOT.resolve())) or not base.exists():
-        raise HTTPException(404, "フォルダが見つかりません")
-    files = sorted(base.rglob("*.dxf") if req.recursive else base.glob("*.dxf"))
+    if req.files:
+        files = []
+        for rel in req.files:
+            p = (DXF_ROOT / rel).resolve()
+            if not str(p).startswith(str(DXF_ROOT.resolve())) or not p.exists():
+                raise HTTPException(404, f"ファイルが見つかりません: {rel}")
+            if p.suffix.lower() == ".dxf":
+                files.append(p)
+        files = sorted(set(files))
+        label = f"選択{len(files)}件"
+    else:
+        base = (DXF_ROOT / req.path).resolve()
+        if not str(base).startswith(str(DXF_ROOT.resolve())) or not base.exists():
+            raise HTTPException(404, "フォルダが見つかりません")
+        files = sorted(base.rglob("*.dxf") if req.recursive else base.glob("*.dxf"))
+        label = req.path or "部品表フォルダ全体"
     if not files:
-        raise HTTPException(400, "対象フォルダに DXF がありません")
+        raise HTTPException(400, "対象の DXF がありません")
     if len(files) > MAX_FILES:
         raise HTTPException(400, f"対象が多すぎます ({len(files)}件 > 上限{MAX_FILES}件)")
-    label = req.path or "部品表フォルダ全体"
     job = start_job(files, BULK_ROOT, label)
     return {"job_id": job["id"], "total": job["total"], "out_dir": job["out_dir"]}
 

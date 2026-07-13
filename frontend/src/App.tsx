@@ -217,7 +217,7 @@ export default function App() {
     }
   }, [doc]);
 
-  // ---- 一括3D化
+  // ---- 一括3D化 (フォルダ全体)
   const onBulkStart = useCallback(async (path: string, label: string) => {
     try {
       const r = await bulkStart(path);
@@ -227,6 +227,21 @@ export default function App() {
       });
       setTab("bulk");
       showToast("ok", `一括3D化を開始しました (${r.total} 件)。処理中も他の作業ができます`);
+    } catch (e) {
+      showToast("err", String(e));
+    }
+  }, []);
+
+  // ---- 一括3D化 (チェックしたファイルのみ)
+  const onBulkStartFiles = useCallback(async (files: string[]) => {
+    try {
+      const r = await bulkStart("", files);
+      setBulkJob({
+        id: r.job_id, label: `選択${files.length}件`, total: r.total, done: 0,
+        running: true, current: null, out_dir: r.out_dir, results: [], started_at: "",
+      });
+      setTab("bulk");
+      showToast("ok", `選択した ${r.total} 件の一括3D化を開始しました。処理中も他の作業ができます`);
     } catch (e) {
       showToast("err", String(e));
     }
@@ -298,6 +313,7 @@ export default function App() {
           currentName={doc?.name ?? null}
           busy={busy}
           onBulkStart={onBulkStart}
+          onBulkStartFiles={onBulkStartFiles}
           bulkRunning={!!bulkJob?.running}
         />
 
