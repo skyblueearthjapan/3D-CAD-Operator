@@ -178,6 +178,10 @@ RULES = """あなたは機械製図の専門家です。日本の機械部品図
 - 複数ビューを突き合わせ、穴の向き・深さ・皿/ザグリの面を判断すること
 - 材質のPL値は素材厚。断面図に仕上げ厚の寸法があればそちらを優先すること
 - 作図と注記が食い違う場合(例: 円がφ7で注記が2-φ8)は注記を優先し drawing_conflicts に記録
+- **ビュー間で形状クラス自体が矛盾する場合(平面図は単純な板に見えるが断面図/側面図に
+  曲げフランジ・ハット断面が描かれている等)は、断面図を正とする**。安易に平板(rect/profile)を
+  選ばないこと。断面が曲げを示すなら bent_plate、確信が持てなければ unsupported にして
+  drawing_conflicts に矛盾を記録する
 - PCD上の等配穴は1穴ずつ座標展開して holes に列挙する(count表現ではない)。
   **開始角(位相)を勝手に仮定しないこと**: 座標は必ず図面に作図された円の実座標から取る
   (例: 4穴等配が45°/135°/225°/315°に描かれているのに0°/90°/180°/270°と書くのは誤り)
@@ -384,19 +388,27 @@ def _interpret_claude(dump: str) -> tuple[ShapeSpec, dict]:
     last_err: Exception | None = None
     for _ in range(2):  # 初回 + 検証エラー時1回リトライ
         extra = {"output_config": {"effort": AI_EFFORT}} if AI_EFFORT else {}
-        resp = client.messages.create(
+        # max_tokensが大きいと非ストリーミングはSDKが拒否する(10分制約)ためstreamで実行
+        with client.messages.stream(
             model=AI_MODEL,
-            max_tokens=16000,
+            max_tokens=32000,  # adaptive thinkingが大きく消費しても本文が切れない余裕を確保
             thinking={"type": "adaptive"},
             system=system,
             messages=messages,
             **extra,
-        )
+        ) as stream:
+            resp = stream.get_final_message()
         total_in += resp.usage.input_tokens
         total_out += resp.usage.output_tokens
         if resp.stop_reason == "refusal":
             raise RuntimeError("Claude が応答を拒否しました (安全性判定)")
         text = "".join(b.text for b in resp.content if b.type == "text")
+        if not text.strip():
+            # 思考でトークンを使い切る等で本文が空 → リトライへ (実測で複雑図面時に発生)
+            last_err = RuntimeError(f"Claude応答が空 (stop_reason={resp.stop_reason})")
+            messages = [{"role": "user", "content": dump
+                         + "\n\n(注意: 思考は最小限にし、JSONのみを直接出力してください)"}]
+            continue
         try:
             spec = ShapeSpec.model_validate(_extract_json(text))
             usage = {"input_tokens": total_in, "output_tokens": total_out,
